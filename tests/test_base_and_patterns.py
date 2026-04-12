@@ -141,6 +141,31 @@ async def test_show_falls_back_to_answer_when_edit_fails(wizard, monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_show_does_not_send_new_message_when_callback_render_is_unchanged(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery, FakeMessage
+
+    class DummyTelegramBadRequest(RuntimeError):
+        pass
+
+    monkeypatch.setattr(base_module, "TelegramBadRequest", DummyTelegramBadRequest)
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoScene(wizard)
+    callback_message = FakeMessage(
+        edit_exception=DummyTelegramBadRequest("Bad Request: message is not modified"),
+        edit_message_id=70,
+    )
+    call = FakeCallbackQuery(callback_message)
+
+    result = await scene.show(call, "Same")
+
+    assert result is callback_message
+    assert callback_message.answer_calls == []
+
+
+@pytest.mark.asyncio
 async def test_menu_scene_combines_static_rows_and_navigation(wizard) -> None:
     scene = DemoMenuScene(wizard)
     markup = await scene.menu_markup(SimpleNamespace())
@@ -378,6 +403,24 @@ async def test_navigator_replace_enters_target_without_snapshotting_current_scen
     assert wizard.manager.history.cleared is True
     assert wizard.leave_calls == [(False, {"page": 2})]
     assert wizard.manager.enter_calls == [("tests.confirm", False, {"page": 2})]
+
+
+@pytest.mark.asyncio
+async def test_navigate_open_replaces_current_scene_without_duplicating_history(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._navigate_open(call, Navigate.open("tests.demo"))
+
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.enter_calls == [("tests.demo", False, {})]
 
 
 @pytest.mark.asyncio

@@ -427,6 +427,9 @@ class AppScene(Scene, reset_history_on_enter=False):
     @on.callback_query(Navigate.filter(F.action == "open"))
     async def _navigate_open(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
+        if callback_data.target == self.state_id:
+            await self.nav.replace(callback_data.target)
+            return
         await self.nav.to(callback_data.target)
 
     @on.callback_query(Navigate.filter(F.action == "back"))
@@ -481,7 +484,10 @@ class AppScene(Scene, reset_history_on_enter=False):
 
         try:
             message = await call.message.edit_text(**payload)
-        except TelegramBadRequest:
+        except TelegramBadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                message = call.message
+                return await self._remember_screen(message, remember=remember)
             message = await call.message.answer(**payload)
 
         return await self._remember_screen(message, remember=remember)

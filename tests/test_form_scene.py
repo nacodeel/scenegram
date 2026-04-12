@@ -62,7 +62,7 @@ def test_form_scene_declares_generated_steps() -> None:
 def test_step_nav_row_builds_requested_actions() -> None:
     buttons = step_nav_row(next_step=True, back=True, exit_scene=True)
 
-    assert [button.text for button in buttons] == ["⬅️ Назад", "➡️ Дальше", "✖️ Выйти"]
+    assert [button.text for button in buttons] == ["⬅️ Предыдущий шаг", "➡️ Дальше", "✖️ Выйти"]
     assert buttons[0].callback_data == StepAction(action="back")
     assert buttons[1].callback_data == StepAction(action="next")
     assert buttons[2].callback_data == StepAction(action="exit")

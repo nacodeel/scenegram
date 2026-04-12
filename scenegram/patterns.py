@@ -166,7 +166,7 @@ def step_nav_row(
 ) -> list[Button]:
     buttons: list[Button] = []
     if back:
-        buttons.append(Button(text="⬅️ Назад", callback_data=StepAction(action="back")))
+        buttons.append(Button(text="⬅️ Предыдущий шаг", callback_data=StepAction(action="back")))
     if next_step:
         buttons.append(Button(text="➡️ Дальше", callback_data=StepAction(action="next")))
     if exit_scene:
