@@ -73,7 +73,10 @@ class ProductCrudAdapter:
         )
 
     async def get_item(self, scene, item_id: str) -> ProductRecord:
-        return next(item for item in self.items if item.id == item_id)
+        item = next((item for item in self.items if item.id == item_id), None)
+        if item is None:
+            raise LookupError(f"Product '{item_id}' was not found")
+        return item
 
     async def get_item_title(self, scene, item: ProductRecord) -> str:
         return item.title

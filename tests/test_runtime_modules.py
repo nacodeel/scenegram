@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import scenegram.base as base_module
+import scenegram.packs as packs_module
 from scenegram import (
     RUNTIME,
     BroadcastReport,
@@ -49,6 +50,9 @@ class DemoBroadcastScene(BroadcastScene, state="tests.broadcast"):
 
 
 class CrudAdapterStub:
+    def __init__(self, *, missing_ids: set[str] | None = None) -> None:
+        self.missing_ids = set(missing_ids or ())
+
     async def list_items(self, scene, page: int, per_page: int) -> CrudPage:
         return CrudPage(
             items=[CrudListItem(id="42", title="Item 42")],
@@ -58,6 +62,8 @@ class CrudAdapterStub:
         )
 
     async def get_item(self, scene, item_id: str):
+        if item_id in self.missing_ids:
+            raise LookupError(item_id)
         return {"id": item_id, "title": f"Item {item_id}"}
 
     async def get_item_title(self, scene, item) -> str:
@@ -73,17 +79,18 @@ class CrudAdapterStub:
 class DemoCrudDetailScene(CrudDetailScene, state="tests.crud.detail"):
     __abstract__ = False
 
-    def __init__(self, wizard) -> None:
+    def __init__(self, wizard, adapter: CrudAdapterStub | None = None) -> None:
         super().__init__(wizard)
-        self.crud_adapter = CrudAdapterStub()
+        self.crud_adapter = adapter or CrudAdapterStub()
 
 
 class DemoCrudDeleteScene(CrudDeleteScene, state="tests.crud.delete"):
     __abstract__ = False
+    list_scene = "tests.crud.list"
 
-    def __init__(self, wizard) -> None:
+    def __init__(self, wizard, adapter: CrudAdapterStub | None = None) -> None:
         super().__init__(wizard)
-        self.crud_adapter = CrudAdapterStub()
+        self.crud_adapter = adapter or CrudAdapterStub()
 
 
 def test_crud_module_builds_portable_menu_manifest() -> None:
@@ -147,6 +154,7 @@ async def test_crud_detail_scene_persists_item_id_from_enter_kwargs(wizard, monk
     from tests.conftest import FakeCallbackQuery
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
     scene = DemoCrudDetailScene(wizard)
     call = FakeCallbackQuery()
 
@@ -161,6 +169,7 @@ async def test_crud_delete_scene_persists_item_id_from_enter_kwargs(wizard, monk
     from tests.conftest import FakeCallbackQuery
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
     scene = DemoCrudDeleteScene(wizard)
     call = FakeCallbackQuery()
 
@@ -168,3 +177,36 @@ async def test_crud_delete_scene_persists_item_id_from_enter_kwargs(wizard, monk
 
     assert wizard.data["item_id"] == "42"
     assert "Удалить Item 42?" in call.message.edit_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_crud_detail_scene_redirects_when_item_was_removed(wizard, monkeypatch) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoCrudDetailScene(wizard, adapter=CrudAdapterStub(missing_ids={"42"}))
+    scene.list_scene = "tests.crud.list"
+    call = FakeCallbackQuery()
+
+    await scene._on_callback_enter(call, item_id="42")
+
+    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert "item_id" not in wizard.data
+    assert call.answer_calls[-1] == scene.missing_item_notice
+
+
+@pytest.mark.asyncio
+async def test_crud_delete_scene_redirects_when_item_was_removed(wizard, monkeypatch) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoCrudDeleteScene(wizard, adapter=CrudAdapterStub(missing_ids={"42"}))
+    call = FakeCallbackQuery()
+
+    await scene._on_callback_enter(call, item_id="42")
+
+    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert "item_id" not in wizard.data
+    assert call.answer_calls[-1] == scene.missing_item_notice

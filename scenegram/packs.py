@@ -138,6 +138,7 @@ class CrudDetailScene(AppScene):
     edit_scene: str | None = None
     delete_scene: str | None = None
     title = "Карточка"
+    missing_item_notice = "Запись больше не найдена."
 
     async def resolve_crud_adapter(self) -> CrudAdapter:
         if self.crud_adapter is not None:
@@ -156,7 +157,23 @@ class CrudDetailScene(AppScene):
     async def load_item(self, event: Message | CallbackQuery) -> Any:
         adapter = await self.resolve_crud_adapter()
         item_id = await self.current_item_id()
-        return await self.run_operation("get_item", event, adapter.get_item, self, item_id)
+        try:
+            return await self.run_operation("get_item", event, adapter.get_item, self, item_id)
+        except LookupError:
+            raise
+        except RuntimeError as exc:
+            if "StopIteration" in str(exc):
+                raise LookupError(item_id) from exc
+            raise
+
+    async def handle_missing_item(self, event: Message | CallbackQuery) -> None:
+        await self.data.discard("item_id")
+        if isinstance(event, CallbackQuery):
+            await event.answer(self.missing_item_notice)
+        if self.list_scene:
+            await self.nav.to(self.list_scene)
+            return
+        await self.nav.home()
 
     async def detail_rows(self, item_id: str) -> list[list[Button]]:
         rows: list[list[Button]] = []
@@ -217,13 +234,19 @@ class CrudDetailScene(AppScene):
     @on.message.enter()
     async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
         await self.remember_item_id(item_id)
-        await self.render_detail(message)
+        try:
+            await self.render_detail(message)
+        except LookupError:
+            await self.handle_missing_item(message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
         await call.answer()
         await self.remember_item_id(item_id)
-        await self.render_detail(call)
+        try:
+            await self.render_detail(call)
+        except LookupError:
+            await self.handle_missing_item(call)
 
     @on.callback_query(CrudAction.filter(F.action == "back"))
     async def _go_back(self, call: CallbackQuery) -> None:
@@ -255,6 +278,7 @@ class CrudDeleteScene(ConfirmScene):
     crud_adapter: CrudAdapter | None = None
     list_scene: str | None = None
     success_notice = "Запись удалена"
+    missing_item_notice = "Запись уже удалена или недоступна."
 
     async def resolve_crud_adapter(self) -> CrudAdapter:
         if self.crud_adapter is not None:
@@ -272,13 +296,30 @@ class CrudDeleteScene(ConfirmScene):
 
     async def current_item(self, event: Message | CallbackQuery) -> Any:
         adapter = await self.resolve_crud_adapter()
-        return await self.run_operation(
-            "get_item",
-            event,
-            adapter.get_item,
-            self,
-            await self.current_item_id(),
-        )
+        item_id = await self.current_item_id()
+        try:
+            return await self.run_operation(
+                "get_item",
+                event,
+                adapter.get_item,
+                self,
+                item_id,
+            )
+        except LookupError:
+            raise
+        except RuntimeError as exc:
+            if "StopIteration" in str(exc):
+                raise LookupError(item_id) from exc
+            raise
+
+    async def handle_missing_item(self, event: Message | CallbackQuery) -> None:
+        await self.data.discard("item_id")
+        if isinstance(event, CallbackQuery):
+            await event.answer(self.missing_item_notice)
+        if self.list_scene:
+            await self.nav.to(self.list_scene)
+            return
+        await self.nav.home()
 
     async def confirm_content(self, event: Message | CallbackQuery):
         adapter = await self.resolve_crud_adapter()
@@ -294,7 +335,11 @@ class CrudDeleteScene(ConfirmScene):
 
     async def on_confirm(self, event: CallbackQuery) -> Any:
         adapter = await self.resolve_crud_adapter()
-        item = await self.current_item(event)
+        try:
+            item = await self.current_item(event)
+        except LookupError:
+            await self.handle_missing_item(event)
+            return
         await self.run_operation("delete_item", event, adapter.delete_item, self, item)
         await event.answer(self.success_notice)
         await self.after_delete(event, item)
@@ -309,12 +354,18 @@ class CrudDeleteScene(ConfirmScene):
     @on.message.enter()
     async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
         await self.remember_item_id(item_id)
-        await super()._on_message_enter(message)
+        try:
+            await super()._on_message_enter(message)
+        except LookupError:
+            await self.handle_missing_item(message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
         await self.remember_item_id(item_id)
-        await super()._on_callback_enter(call)
+        try:
+            await super()._on_callback_enter(call)
+        except LookupError:
+            await self.handle_missing_item(call)
 
 
 def crud_module(
