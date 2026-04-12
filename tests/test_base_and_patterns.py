@@ -256,6 +256,20 @@ async def test_services_call_supports_provider_returning_callable(wizard) -> Non
 
 
 @pytest.mark.asyncio
+async def test_require_service_returns_direct_callable_without_invoking_it(wizard) -> None:
+    async def collector(report: str) -> str:
+        return report
+
+    RUNTIME.reset()
+    RUNTIME.service_container = MappingContainer({"collector": collector})
+    scene = DemoScene(wizard)
+
+    resolved = await scene.require_service("collector")
+
+    assert resolved is collector
+
+
+@pytest.mark.asyncio
 async def test_confirm_scene_default_rows_are_built(wizard) -> None:
     scene = DemoConfirmScene(wizard)
     rows = await scene.confirm_rows(SimpleNamespace())
@@ -353,6 +367,32 @@ async def test_navigator_back_can_route_home_via_back_target_override(wizard) ->
     assert wizard.goto_calls == [("tests.demo", {"step": 1})]
     assert "_back_target" not in wizard.data
     assert wizard.back_calls == []
+
+
+@pytest.mark.asyncio
+async def test_navigator_replace_enters_target_without_snapshotting_current_scene(wizard) -> None:
+    scene = DemoScene(wizard)
+
+    await scene.nav.replace("tests.confirm", reset_history=True, page=2)
+
+    assert wizard.manager.history.cleared is True
+    assert wizard.leave_calls == [(False, {"page": 2})]
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {"page": 2})]
+
+
+@pytest.mark.asyncio
+async def test_navigator_previous_before_reads_scene_stack_history(wizard) -> None:
+    scene = DemoScene(wizard)
+    from tests.conftest import HistoryRecordStub
+
+    wizard.manager.history.records = [
+        HistoryRecordStub("tests.menu"),
+        HistoryRecordStub("tests.list"),
+        HistoryRecordStub("tests.detail"),
+    ]
+
+    assert await scene.nav.previous_scene_state() == "tests.detail"
+    assert await scene.nav.previous_before("tests.list") == "tests.menu"
 
 
 @pytest.mark.asyncio

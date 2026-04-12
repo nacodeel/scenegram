@@ -132,6 +132,25 @@ class SceneNavigator:
     async def to(self, target: type[Scene] | str, **kwargs: Any) -> None:
         await self.scene.wizard.goto(target, **kwargs)
 
+    async def replace(
+        self,
+        target: type[Scene] | str,
+        *,
+        reset_history: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        manager = getattr(self.scene.wizard, "manager", None)
+        history = getattr(manager, "history", None)
+
+        if history is not None and reset_history and hasattr(history, "clear"):
+            await history.clear()
+
+        await self.scene.wizard.leave(_with_history=False, **kwargs)
+        if manager is None or not hasattr(manager, "enter"):
+            await self.scene.wizard.goto(target, **kwargs)
+            return
+        await manager.enter(target, _check_active=False, **kwargs)
+
     async def back(self, **kwargs: Any) -> None:
         target = await self.scene.data.pop("_back_target", default=None)
         if target:
@@ -166,6 +185,37 @@ class SceneNavigator:
             await self.to(target, **kwargs)
             return
         await self.exit(**kwargs)
+
+    async def stack_states(self) -> list[str]:
+        manager = getattr(self.scene.wizard, "manager", None)
+        history = getattr(manager, "history", None)
+        if history is None or not hasattr(history, "all"):
+            return []
+
+        records = await history.all()
+        states: list[str] = []
+        for record in records:
+            state = getattr(record, "state", None)
+            if isinstance(state, str):
+                states.append(state)
+        return states
+
+    async def previous_scene_state(self, *, skip: int = 0) -> str | None:
+        states = await self.stack_states()
+        index = len(states) - 1 - skip
+        if index < 0:
+            return None
+        return states[index]
+
+    async def previous_before(self, target_state: str) -> str | None:
+        states = await self.stack_states()
+        for index in range(len(states) - 1, -1, -1):
+            if states[index] != target_state:
+                continue
+            if index == 0:
+                return None
+            return states[index - 1]
+        return None
 
 
 class AppScene(Scene, reset_history_on_enter=False):

@@ -171,10 +171,12 @@ class CrudDetailScene(AppScene):
 
     async def handle_missing_item(self, event: Message | CallbackQuery) -> None:
         await self.data.discard("item_id")
+        back_target = await self.nav.previous_before(self.list_scene) if self.list_scene else None
+        await self.data.update(_back_target=back_target or BACK_TARGET_HOME)
         if isinstance(event, CallbackQuery):
             await event.answer(self.missing_item_notice)
         if self.list_scene:
-            await self.nav.to(self.list_scene)
+            await self.nav.replace(self.list_scene, reset_history=True)
             return
         await self.nav.home()
 
@@ -254,9 +256,6 @@ class CrudDetailScene(AppScene):
     @on.callback_query(CrudAction.filter(F.action == "back"))
     async def _go_back(self, call: CallbackQuery) -> None:
         await call.answer()
-        if self.list_scene:
-            await self.nav.to(self.list_scene)
-            return
         await self.nav.back()
 
     @on.callback_query(CrudAction.filter(F.action == "edit"))
@@ -320,10 +319,12 @@ class CrudDeleteScene(ConfirmScene):
 
     async def handle_missing_item(self, event: Message | CallbackQuery) -> None:
         await self.data.discard("item_id")
+        back_target = await self.nav.previous_before(self.list_scene) if self.list_scene else None
+        await self.data.update(_back_target=back_target or BACK_TARGET_HOME)
         if isinstance(event, CallbackQuery):
             await event.answer(self.missing_item_notice)
         if self.list_scene:
-            await self.nav.to(self.list_scene)
+            await self.nav.replace(self.list_scene, reset_history=True)
             return
         await self.nav.home()
 
@@ -350,8 +351,9 @@ class CrudDeleteScene(ConfirmScene):
         await event.answer(self.success_notice)
         await self.after_delete(event, item)
         if self.list_scene:
-            await self.data.update(_back_target=BACK_TARGET_HOME)
-            await self.nav.to(self.list_scene)
+            back_target = await self.nav.previous_before(self.list_scene)
+            await self.data.update(_back_target=back_target or BACK_TARGET_HOME)
+            await self.nav.replace(self.list_scene, reset_history=True)
             return
         await self.nav.exit()
 

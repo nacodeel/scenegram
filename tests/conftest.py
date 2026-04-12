@@ -8,14 +8,43 @@ import pytest
 from scenegram.runtime import RUNTIME
 
 
+class HistoryRecordStub:
+    def __init__(self, state: str) -> None:
+        self.state = state
+
+
+class HistoryManagerStub:
+    def __init__(self) -> None:
+        self.records: list[HistoryRecordStub] = []
+        self.cleared = False
+
+    async def all(self) -> list[HistoryRecordStub]:
+        return list(self.records)
+
+    async def clear(self) -> None:
+        self.cleared = True
+        self.records.clear()
+
+
+class ManagerStub:
+    def __init__(self) -> None:
+        self.history = HistoryManagerStub()
+        self.enter_calls: list[tuple[Any, bool, dict[str, Any]]] = []
+
+    async def enter(self, scene: Any, _check_active: bool = True, **kwargs: Any) -> None:
+        self.enter_calls.append((scene, _check_active, kwargs))
+
+
 class WizardStub:
     def __init__(self, data: dict[str, Any] | None = None) -> None:
         self.data = dict(data or {})
         self.scene = None
+        self.manager = ManagerStub()
         self.goto_calls: list[tuple[Any, dict[str, Any]]] = []
         self.back_calls: list[dict[str, Any]] = []
         self.retake_calls: list[dict[str, Any]] = []
         self.exit_calls: list[dict[str, Any]] = []
+        self.leave_calls: list[tuple[bool, dict[str, Any]]] = []
 
     async def goto(self, target: Any, **kwargs: Any) -> None:
         self.goto_calls.append((target, kwargs))
@@ -28,6 +57,9 @@ class WizardStub:
 
     async def exit(self, **kwargs: Any) -> None:
         self.exit_calls.append(kwargs)
+
+    async def leave(self, _with_history: bool = True, **kwargs: Any) -> None:
+        self.leave_calls.append((_with_history, kwargs))
 
     async def get_data(self) -> dict[str, Any]:
         return dict(self.data)

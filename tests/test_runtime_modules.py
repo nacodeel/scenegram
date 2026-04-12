@@ -5,7 +5,6 @@ import pytest
 import scenegram.base as base_module
 import scenegram.packs as packs_module
 from scenegram import (
-    BACK_TARGET_HOME,
     RUNTIME,
     BroadcastReport,
     BroadcastResult,
@@ -182,33 +181,43 @@ async def test_crud_delete_scene_persists_item_id_from_enter_kwargs(wizard, monk
 
 @pytest.mark.asyncio
 async def test_crud_detail_scene_redirects_when_item_was_removed(wizard, monkeypatch) -> None:
-    from tests.conftest import FakeCallbackQuery
+    from tests.conftest import FakeCallbackQuery, HistoryRecordStub
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
     monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
     scene = DemoCrudDetailScene(wizard, adapter=CrudAdapterStub(missing_ids={"42"}))
     scene.list_scene = "tests.crud.list"
     call = FakeCallbackQuery()
+    wizard.manager.history.records = [
+        HistoryRecordStub("tests.menu"),
+        HistoryRecordStub("tests.crud.list"),
+        HistoryRecordStub("tests.crud.detail"),
+    ]
 
     await scene._on_callback_enter(call, item_id="42")
 
-    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert wizard.manager.enter_calls == [("tests.crud.list", False, {})]
     assert "item_id" not in wizard.data
     assert call.answer_calls[-1] == scene.missing_item_notice
 
 
 @pytest.mark.asyncio
 async def test_crud_delete_scene_redirects_when_item_was_removed(wizard, monkeypatch) -> None:
-    from tests.conftest import FakeCallbackQuery
+    from tests.conftest import FakeCallbackQuery, HistoryRecordStub
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
     monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
     scene = DemoCrudDeleteScene(wizard, adapter=CrudAdapterStub(missing_ids={"42"}))
     call = FakeCallbackQuery()
+    wizard.manager.history.records = [
+        HistoryRecordStub("tests.menu"),
+        HistoryRecordStub("tests.crud.list"),
+        HistoryRecordStub("tests.crud.detail"),
+    ]
 
     await scene._on_callback_enter(call, item_id="42")
 
-    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert wizard.manager.enter_calls == [("tests.crud.list", False, {})]
     assert "item_id" not in wizard.data
     assert call.answer_calls[-1] == scene.missing_item_notice
 
@@ -218,7 +227,7 @@ async def test_crud_delete_scene_sets_back_target_after_successful_delete(
     wizard,
     monkeypatch,
 ) -> None:
-    from tests.conftest import FakeCallbackQuery
+    from tests.conftest import FakeCallbackQuery, HistoryRecordStub
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
     monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
@@ -227,10 +236,17 @@ async def test_crud_delete_scene_sets_back_target_after_successful_delete(
     call = FakeCallbackQuery()
 
     wizard.data = {"item_id": "42"}
+    wizard.manager.history.records = [
+        HistoryRecordStub("tests.menu"),
+        HistoryRecordStub("tests.crud.list"),
+        HistoryRecordStub("tests.crud.detail"),
+    ]
     await scene.on_confirm(call)
 
-    assert wizard.data["_back_target"] == BACK_TARGET_HOME
-    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert wizard.data["_back_target"] == "tests.menu"
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.crud.list", False, {})]
 
 
 @pytest.mark.asyncio
@@ -238,14 +254,37 @@ async def test_crud_delete_scene_missing_item_without_stored_id_redirects_cleanl
     wizard,
     monkeypatch,
 ) -> None:
-    from tests.conftest import FakeCallbackQuery
+    from tests.conftest import FakeCallbackQuery, HistoryRecordStub
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
     monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
     scene = DemoCrudDeleteScene(wizard)
     call = FakeCallbackQuery()
+    wizard.manager.history.records = [
+        HistoryRecordStub("tests.menu"),
+        HistoryRecordStub("tests.crud.list"),
+        HistoryRecordStub("tests.crud.detail"),
+    ]
 
     await scene._on_callback_enter(call)
 
-    assert wizard.goto_calls == [("tests.crud.list", {})]
+    assert wizard.manager.enter_calls == [("tests.crud.list", False, {})]
     assert call.answer_calls[-1] == scene.missing_item_notice
+
+
+@pytest.mark.asyncio
+async def test_crud_detail_scene_back_uses_scene_history_instead_of_goto(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoCrudDetailScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._go_back(call)
+
+    assert wizard.back_calls == [{}]
+    assert wizard.goto_calls == []
