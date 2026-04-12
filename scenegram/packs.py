@@ -147,6 +147,12 @@ class CrudDetailScene(AppScene):
     async def current_item_id(self) -> str:
         return str(await self.data.require("item_id"))
 
+    async def remember_item_id(self, item_id: str | None = None) -> str:
+        if item_id is None:
+            return await self.current_item_id()
+        await self.data.update(item_id=str(item_id))
+        return str(item_id)
+
     async def load_item(self, event: Message | CallbackQuery) -> Any:
         adapter = await self.resolve_crud_adapter()
         item_id = await self.current_item_id()
@@ -209,12 +215,14 @@ class CrudDetailScene(AppScene):
         )
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
+        await self.remember_item_id(item_id)
         await self.render_detail(message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
         await call.answer()
+        await self.remember_item_id(item_id)
         await self.render_detail(call)
 
     @on.callback_query(CrudAction.filter(F.action == "back"))
@@ -256,6 +264,12 @@ class CrudDeleteScene(ConfirmScene):
     async def current_item_id(self) -> str:
         return str(await self.data.require("item_id"))
 
+    async def remember_item_id(self, item_id: str | None = None) -> str:
+        if item_id is None:
+            return await self.current_item_id()
+        await self.data.update(item_id=str(item_id))
+        return str(item_id)
+
     async def current_item(self, event: Message | CallbackQuery) -> Any:
         adapter = await self.resolve_crud_adapter()
         return await self.run_operation(
@@ -291,6 +305,16 @@ class CrudDeleteScene(ConfirmScene):
 
     async def after_delete(self, event: CallbackQuery, item: Any) -> None:
         return None
+
+    @on.message.enter()
+    async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
+        await self.remember_item_id(item_id)
+        await super()._on_message_enter(message)
+
+    @on.callback_query.enter()
+    async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
+        await self.remember_item_id(item_id)
+        await super()._on_callback_enter(call)
 
 
 def crud_module(
