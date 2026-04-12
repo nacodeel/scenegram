@@ -13,6 +13,7 @@ from scenegram import (
     pager_rows,
     paginate,
     reply_menu,
+    reply_nav_row,
 )
 
 
@@ -36,11 +37,30 @@ def test_reply_menu_forwards_api_kwargs() -> None:
     assert markup.keyboard[0][0].request_contact is True
 
 
+def test_reply_menu_forwards_keyboard_level_kwargs() -> None:
+    markup = reply_menu(
+        [[ReplyButton(text="Cancel")]],
+        one_time_keyboard=True,
+        input_field_placeholder="Введите ответ",
+        is_persistent=False,
+    )
+
+    assert markup.one_time_keyboard is True
+    assert markup.input_field_placeholder == "Введите ответ"
+    assert markup.is_persistent is False
+
+
 def test_nav_row_respects_flags() -> None:
     buttons = nav_row(back=True, home=True, cancel=False, home_target="common.home")
 
     assert [button.text for button in buttons] == ["⬅️ Назад", "🏠 Домой"]
     assert buttons[1].callback_data == Navigate.home("common.home")
+
+
+def test_reply_nav_row_respects_flags() -> None:
+    buttons = reply_nav_row(back=True, home=False, cancel=True)
+
+    assert [button.text for button in buttons] == ["Назад", "Отмена"]
 
 
 def test_noop_button_uses_noop_callback() -> None:

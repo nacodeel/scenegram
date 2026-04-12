@@ -11,7 +11,7 @@ from aiogram import Router
 from aiogram.filters import Command, Filter
 from aiogram.fsm.scene import SceneRegistry
 
-from .contracts import SceneCleanup, SceneModule
+from .contracts import SceneCleanup, SceneMiddleware, SceneModule
 from .di import adapt_container
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import DEFAULT_CLEANUP, RUNTIME, RoleResolver
@@ -106,6 +106,52 @@ def _apply_filters(router: Router, *filters: Any) -> None:
         observer = getattr(router, observer_name, None)
         if observer is not None and hasattr(observer, "filter"):
             observer.filter(*filters)
+
+
+def _resolve_middleware_instance(
+    binding: SceneMiddleware,
+    *,
+    scene_cls: type | None = None,
+    module: SceneModule | None = None,
+) -> Any:
+    middleware = binding.middleware
+    if not binding.factory:
+        return middleware
+    if inspect.isclass(middleware):
+        return middleware()
+
+    try:
+        signature = inspect.signature(middleware)
+    except (TypeError, ValueError):
+        return middleware()
+
+    kwargs: dict[str, Any] = {}
+    if "scene" in signature.parameters:
+        kwargs["scene"] = scene_cls
+    if "module" in signature.parameters:
+        kwargs["module"] = module
+    return middleware(**kwargs)
+
+
+def _apply_middlewares(
+    router: Router,
+    middlewares: Sequence[SceneMiddleware],
+    *,
+    scene_cls: type | None = None,
+    module: SceneModule | None = None,
+) -> None:
+    for binding in middlewares:
+        instance = _resolve_middleware_instance(
+            binding,
+            scene_cls=scene_cls,
+            module=module,
+        )
+        for observer_name in binding.observers:
+            observer = getattr(router, observer_name, None)
+            if observer is None:
+                raise ValueError(f"Router has no observer named {observer_name!r}")
+            manager = observer.outer_middleware if binding.outer else observer.middleware
+            manager(instance)
 
 
 def _normalize_packages(package_name: str | Sequence[str]) -> tuple[str, ...]:
@@ -232,6 +278,7 @@ def create_scenes_router(
     service_container: Any | None = None,
     scene_modules: Sequence[SceneModule] | None = None,
     cleanup: SceneCleanup | None = None,
+    middlewares: Sequence[SceneMiddleware] | None = None,
 ) -> SceneBootstrapResult:
     from .base import AppScene
 
@@ -255,10 +302,12 @@ def create_scenes_router(
     RUNTIME.register_modules(discovered_modules.values())
 
     grouped_routers: dict[tuple[str, ...], Router] = {}
+    global_middlewares = tuple(middlewares or ())
 
     for descriptor in descriptors:
         scene_cls = descriptor.scene
         allowed_roles = descriptor.roles
+        module = discovered_modules.get(descriptor.scene_module or "")
 
         RUNTIME.bind_scene_module(descriptor.state, descriptor.scene_module)
 
@@ -277,14 +326,29 @@ def create_scenes_router(
 
             target_router = grouped_routers[router_key]
 
-        registry.add(scene_cls, router=target_router)
+        scene_router = Router(name=f"scene:{descriptor.state}")
+        registry.add(scene_cls)
+
+        _apply_middlewares(
+            scene_router,
+            (
+                *global_middlewares,
+                *(module.middlewares if module is not None else ()),
+                *tuple(getattr(scene_cls, "middlewares", ())),
+            ),
+            scene_cls=scene_cls,
+            module=module,
+        )
+        scene_router.include_router(scene_cls.as_router())
 
         for entry in descriptor.entrypoints:
-            observer = getattr(target_router, entry.observer)
+            observer = getattr(scene_router, entry.observer)
             observer.register(
                 scene_cls.as_handler(**entry.handler_kwargs),
                 *entry.filters,
             )
+
+        target_router.include_router(scene_router)
 
     return SceneBootstrapResult(
         router=root_router,

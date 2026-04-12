@@ -49,6 +49,7 @@ showcase_bot/
 ### `scenes/common/onboarding.py`
 
 - `FormScene` с typed result model;
+- auto reply-кнопка `Отмена` на input-шагах;
 - cleanup policy `delete_user_messages=True`;
 - вызов глобального сервиса через `self.services.call(...)`.
 
@@ -77,6 +78,7 @@ showcase_bot/
 - пробрасывать bot-wide сервисы через `service_container`;
 - использовать `SCENEGRAM_MODULE` для самоописания модулей;
 - полагаться на `aiogram.utils.formatting`, а не на HTML-строки;
+- использовать auto reply-keyboards на `StepScene` / `FormScene` и удалять их через built-in cancel flow;
 - задавать cleanup/chat action policies декларативно на уровне сцены.
 
 ## Запуск

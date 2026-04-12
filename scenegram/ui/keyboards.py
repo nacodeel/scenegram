@@ -6,10 +6,12 @@ from typing import Any
 
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
+    ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
 from .callbacks import Navigate
@@ -79,9 +81,43 @@ def reply_menu(
     rows: Sequence[Sequence[ReplyButton]],
     *,
     resize_keyboard: bool = True,
+    one_time_keyboard: bool | None = None,
+    input_field_placeholder: str | None = None,
+    is_persistent: bool | None = None,
+    selective: bool | None = None,
 ) -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text=button.text, **dict(button.api_kwargs or {})) for button in row]
         for row in rows
     ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=resize_keyboard)
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=resize_keyboard,
+        one_time_keyboard=one_time_keyboard,
+        input_field_placeholder=input_field_placeholder,
+        is_persistent=is_persistent,
+        selective=selective,
+    )
+
+
+def reply_nav_row(
+    *,
+    back: bool = False,
+    home: bool = False,
+    cancel: bool = True,
+    back_text: str = "Назад",
+    home_text: str = "Домой",
+    cancel_text: str = "Отмена",
+) -> list[ReplyButton]:
+    buttons: list[ReplyButton] = []
+    if back:
+        buttons.append(ReplyButton(text=back_text))
+    if home:
+        buttons.append(ReplyButton(text=home_text))
+    if cancel:
+        buttons.append(ReplyButton(text=cancel_text))
+    return buttons
+
+
+def uses_message_reply_markup(reply_markup: object | None) -> bool:
+    return isinstance(reply_markup, (ReplyKeyboardMarkup, ReplyKeyboardRemove, ForceReply))

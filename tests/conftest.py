@@ -105,6 +105,7 @@ class FakeMessage:
         chat_id: int = 100,
         text: str = "",
         answer_message_id: int = 501,
+        reply_message_id: int = 503,
         edit_message_id: int = 502,
         edit_exception: Exception | None = None,
     ) -> None:
@@ -112,14 +113,20 @@ class FakeMessage:
         self.chat = SimpleNamespace(id=chat_id)
         self.text = text
         self.answer_message_id = answer_message_id
+        self.reply_message_id = reply_message_id
         self.edit_message_id = edit_message_id
         self.edit_exception = edit_exception
         self.answer_calls: list[dict[str, Any]] = []
+        self.reply_calls: list[dict[str, Any]] = []
         self.edit_calls: list[dict[str, Any]] = []
 
     async def answer(self, **kwargs: Any) -> FakeResultMessage:
         self.answer_calls.append(kwargs)
         return FakeResultMessage(self.answer_message_id)
+
+    async def reply(self, **kwargs: Any) -> FakeResultMessage:
+        self.reply_calls.append(kwargs)
+        return FakeResultMessage(self.reply_message_id)
 
     async def edit_text(self, **kwargs: Any) -> FakeResultMessage:
         self.edit_calls.append(kwargs)

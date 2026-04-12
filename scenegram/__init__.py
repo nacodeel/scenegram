@@ -23,7 +23,9 @@ from .contracts import (
     MenuContribution,
     SceneActionConfig,
     SceneCleanup,
+    SceneMiddleware,
     SceneModule,
+    scene_middleware,
 )
 from .di import (
     CompositeContainer,
@@ -49,7 +51,16 @@ from .roles import SceneRole
 from .runtime import DEFAULT_CLEANUP, RUNTIME, SceneRuntime
 from .tasks import SceneTaskRunner, TaskHandle
 from .ui.callbacks import Navigate, PageNav
-from .ui.keyboards import Button, ReplyButton, inline_menu, nav_row, noop_button, reply_menu
+from .ui.keyboards import (
+    Button,
+    ReplyButton,
+    inline_menu,
+    nav_row,
+    noop_button,
+    reply_menu,
+    reply_nav_row,
+    uses_message_reply_markup,
+)
 from .ui.pagination import PageWindow, PaginatedScene, pager_rows, paginate
 
 __all__ = [
@@ -94,6 +105,7 @@ __all__ = [
     "SceneDataProxy",
     "SceneDescriptor",
     "SceneHistoryProxy",
+    "SceneMiddleware",
     "SceneModule",
     "SceneNavigator",
     "SceneRole",
@@ -119,5 +131,8 @@ __all__ = [
     "pager_rows",
     "paginate",
     "reply_menu",
+    "reply_nav_row",
+    "scene_middleware",
     "step_nav_row",
+    "uses_message_reply_markup",
 ]

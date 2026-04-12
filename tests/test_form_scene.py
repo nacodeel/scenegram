@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from aiogram.types import ReplyKeyboardMarkup
 
 import scenegram.base as base_module
-from scenegram import FormAction, FormField, FormScene, StepAction, step_nav_row
+from scenegram import FormAction, FormField, FormScene, ReplyButton, StepAction, step_nav_row
 
 
 @dataclass(slots=True)
@@ -55,6 +56,11 @@ class DemoFormScene(FormScene, state="tests.form"):
         self.submitted = result
 
 
+class CustomReplyFormScene(DemoFormScene, state="tests.form.reply"):
+    __abstract__ = False
+    reply_rows = ((ReplyButton(text="Помощь"),),)
+
+
 def test_form_scene_declares_generated_steps() -> None:
     assert DemoFormScene.declared_steps() == ("field__age", "field__email", "__confirm__")
 
@@ -80,6 +86,10 @@ async def test_form_scene_parser_and_validator_move_to_next_field(wizard) -> Non
     assert wizard.data["age"] == 25
     assert wizard.data["_step"] == "field__email"
     assert message.answer_calls[-1]["text"] == "Шаг 2/2\n\nКакой e-mail использовать?"
+    assert isinstance(message.answer_calls[-1]["reply_markup"], ReplyKeyboardMarkup)
+    assert [button.text for button in message.answer_calls[-1]["reply_markup"].keyboard[0]] == [
+        "Отмена"
+    ]
 
 
 @pytest.mark.asyncio
@@ -93,6 +103,7 @@ async def test_form_scene_validation_error_keeps_current_step(wizard) -> None:
 
     assert wizard.data.get("_step") is None
     assert "Возраст должен быть не меньше 18." in message.answer_calls[-1]["text"]
+    assert message.answer_calls[-1]["reply_markup"].keyboard[0][0].text == "Отмена"
 
 
 @pytest.mark.asyncio
@@ -106,6 +117,7 @@ async def test_form_scene_parser_error_keeps_current_step(wizard) -> None:
 
     assert wizard.data.get("_step") is None
     assert "invalid literal for int()" in message.answer_calls[-1]["text"]
+    assert message.answer_calls[-1]["reply_markup"].keyboard[0][0].text == "Отмена"
 
 
 @pytest.mark.asyncio
@@ -149,7 +161,8 @@ async def test_form_scene_edit_action_returns_to_last_field(wizard, monkeypatch)
     await scene._edit_action(call)
 
     assert wizard.data["_step"] == "field__email"
-    assert "Шаг 2/2" in call.message.edit_calls[-1]["text"]
+    assert call.message.edit_calls == []
+    assert "Шаг 2/2" in call.message.answer_calls[-1]["text"]
 
 
 @pytest.mark.asyncio
@@ -160,3 +173,17 @@ async def test_form_scene_confirm_rows_use_form_actions(wizard) -> None:
 
     assert rows[0][0].callback_data == FormAction(action="submit")
     assert rows[1][0].callback_data == FormAction(action="edit")
+
+
+@pytest.mark.asyncio
+async def test_form_scene_supports_custom_reply_rows_before_cancel(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = CustomReplyFormScene(wizard)
+    message = FakeMessage(text="25")
+
+    await scene._on_step_input(message)
+
+    markup = message.answer_calls[-1]["reply_markup"]
+    assert [button.text for button in markup.keyboard[0]] == ["Помощь"]
+    assert [button.text for button in markup.keyboard[1]] == ["Отмена"]

@@ -11,7 +11,24 @@ from scenegram import (
     SceneModule,
     SceneRole,
     command_entry,
+    scene_middleware,
 )
+
+
+class TaggedMiddleware:
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+
+    async def __call__(self, handler, event, data):
+        return await handler(event, data)
+
+
+def build_module_message_middleware(*, scene=None, module=None):
+    return TaggedMiddleware(f"module:{module.name}:{scene.__name__}")
+
+
+def build_scene_message_middleware(*, scene=None, module=None):
+    return TaggedMiddleware(f"scene:{scene.__name__}")
 
 SCENEGRAM_MODULE = SceneModule(
     name="fixtures.sample",
@@ -28,6 +45,7 @@ SCENEGRAM_MODULE = SceneModule(
             order=20,
         ),
     ),
+    middlewares=(scene_middleware(build_module_message_middleware, "message", factory=True),),
     metadata={"kind": "fixtures"},
 )
 
@@ -37,6 +55,7 @@ class HomeScene(MenuScene, state="common.home"):
     menu_text = "Home"
     static_rows = ((Button(text="Catalog"),),)
     home_for_roles = frozenset({SceneRole.USER.value})
+    middlewares = (scene_middleware(build_scene_message_middleware, "message", factory=True),)
 
 
 class AdminScene(AppScene, state="admin.dashboard"):

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from aiogram.enums import MessageEntityType
+from aiogram.types import ReplyKeyboardRemove
 
 import scenegram.base as base_module
 from scenegram import (
@@ -17,9 +18,11 @@ from scenegram import (
     MenuScene,
     Navigate,
     PaginatedScene,
+    ReplyButton,
     SceneModule,
     SceneRole,
     StepScene,
+    reply_menu,
 )
 from scenegram.formatting import Bold, Text
 from scenegram.runtime import RUNTIME
@@ -141,6 +144,27 @@ async def test_show_falls_back_to_answer_when_edit_fails(wizard, monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_show_uses_new_message_for_callback_reply_keyboard(wizard, monkeypatch) -> None:
+    from tests.conftest import FakeCallbackQuery, FakeMessage
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoScene(wizard)
+    callback_message = FakeMessage(answer_message_id=91)
+    call = FakeCallbackQuery(callback_message)
+
+    await scene.show(
+        call,
+        "Question",
+        reply_markup=reply_menu([[ReplyButton(text="Отмена")]]),
+    )
+
+    assert callback_message.edit_calls == []
+    assert callback_message.answer_calls[0]["text"] == "Question"
+    assert callback_message.answer_calls[0]["reply_markup"].keyboard[0][0].text == "Отмена"
+    assert wizard.data["_screen_message_id"] == 91
+
+
+@pytest.mark.asyncio
 async def test_show_does_not_send_new_message_when_callback_render_is_unchanged(
     wizard,
     monkeypatch,
@@ -173,6 +197,36 @@ async def test_menu_scene_combines_static_rows_and_navigation(wizard) -> None:
     assert markup.inline_keyboard[0][0].text == "Open"
     assert markup.inline_keyboard[1][0].callback_data == Navigate.back().pack()
     assert markup.inline_keyboard[1][1].callback_data == Navigate.home("tests.demo").pack()
+
+
+@pytest.mark.asyncio
+async def test_cancel_text_replies_with_keyboard_remove_and_navigates_home(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = DemoScene(wizard)
+    scene.home_scene = "tests.confirm"
+    message = FakeMessage(text="Отмена")
+
+    await scene._cancel_text(message)
+
+    assert message.reply_calls[0]["text"] == "Отменено"
+    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert wizard.goto_calls == [("tests.confirm", {})]
+
+
+@pytest.mark.asyncio
+async def test_home_text_replies_with_keyboard_remove_and_navigates_home(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = DemoScene(wizard)
+    scene.home_scene = "tests.confirm"
+    message = FakeMessage(text="Домой")
+
+    await scene._home_text(message)
+
+    assert message.reply_calls[0]["text"] == scene.home_notice_text
+    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert wizard.goto_calls == [("tests.confirm", {})]
 
 
 @pytest.mark.asyncio

@@ -12,9 +12,10 @@ from aiogram.utils.formatting import Bold, Text, as_key_value, as_list
 
 from .base import AppScene
 from .formatting import RenderableText
-from .ui import Button, inline_menu, nav_row
+from .ui import Button, ReplyButton, inline_menu, nav_row, reply_menu, reply_nav_row
 
 type FormHook = str | Callable[..., Any]
+AUTO_REPLY_MARKUP = object()
 
 
 def _hook_name(hook: FormHook) -> str:
@@ -178,6 +179,12 @@ class StepScene(AppScene):
     __abstract__ = True
 
     step_key = "_step"
+    use_reply_keyboard = True
+    reply_rows: Sequence[Sequence[ReplyButton]] = ()
+    reply_navigation_back = False
+    reply_navigation_home = False
+    reply_navigation_cancel = True
+    reply_resize_keyboard = True
 
     @classmethod
     def declared_steps(cls) -> tuple[str, ...]:
@@ -206,6 +213,60 @@ class StepScene(AppScene):
 
     def step_storage_key(self, step_name: str) -> str:
         return step_name
+
+    async def reply_rows_for(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> list[list[ReplyButton]]:
+        rows = [list(row) for row in self.reply_rows]
+        navigation = reply_nav_row(
+            back=self.reply_navigation_back,
+            home=self.reply_navigation_home,
+            cancel=self.reply_navigation_cancel,
+        )
+        if navigation:
+            rows.append(navigation)
+        return rows
+
+    async def reply_markup_for(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> Any | None:
+        if not self.use_reply_keyboard:
+            return None
+        rows = await self.reply_rows_for(step_name, event)
+        if not rows:
+            return None
+        return reply_menu(rows, resize_keyboard=self.reply_resize_keyboard)
+
+    async def show(
+        self,
+        event: Message | CallbackQuery,
+        content: RenderableText | None,
+        *,
+        reply_markup: Any = AUTO_REPLY_MARKUP,
+        remember: bool = True,
+        replace_parse_mode: bool = True,
+        remember_history: bool | None = None,
+        breadcrumb_label: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        resolved_markup = reply_markup
+        if reply_markup is AUTO_REPLY_MARKUP:
+            resolved_markup = await self.reply_markup_for(await self.current_step(), event)
+
+        return await super().show(
+            event,
+            content,
+            reply_markup=resolved_markup,
+            remember=remember,
+            replace_parse_mode=replace_parse_mode,
+            remember_history=remember_history,
+            breadcrumb_label=breadcrumb_label,
+            **kwargs,
+        )
 
     async def current_step(self) -> str:
         step_name = await self.data.get(self.step_key, self.initial_step_name())
@@ -379,10 +440,16 @@ class FormScene(StepScene):
             )
 
         field = self.field_by_step(step_name)
+        markup = await self.field_markup(field, event)
+        if markup is None:
+            return await self.show(
+                event,
+                await self.field_content(field, event),
+            )
         return await self.show(
             event,
             await self.field_content(field, event),
-            reply_markup=await self.field_markup(field, event),
+            reply_markup=markup,
         )
 
     async def field_content(

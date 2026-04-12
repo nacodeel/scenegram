@@ -9,6 +9,7 @@ from aiogram.enums import ChatAction as TelegramChatAction
 Provider = Callable[..., Any]
 ProviderValue = Any | Provider
 RoleSet = frozenset[str]
+ObserverSet = frozenset[str]
 
 
 class SupportsResolve(Protocol):
@@ -54,6 +55,31 @@ class MenuContribution:
     order: int = 100
 
 
+@dataclass(slots=True, frozen=True)
+class SceneMiddleware:
+    middleware: Any
+    observers: ObserverSet = field(
+        default_factory=lambda: frozenset({"message", "callback_query"})
+    )
+    outer: bool = True
+    factory: bool = False
+
+
+def scene_middleware(
+    middleware: Any,
+    *observers: str,
+    outer: bool = True,
+    factory: bool = False,
+) -> SceneMiddleware:
+    normalized = frozenset(observers or ("message", "callback_query"))
+    return SceneMiddleware(
+        middleware=middleware,
+        observers=normalized,
+        outer=outer,
+        factory=factory,
+    )
+
+
 ModuleSetup = Callable[["SceneModule"], Any]
 ModuleCallback = Callable[..., Awaitable[Any] | Any]
 
@@ -66,6 +92,7 @@ class SceneModule:
     description: str = ""
     services: Mapping[str, ProviderValue] = field(default_factory=dict)
     menu_entries: tuple[MenuContribution, ...] = ()
+    middlewares: tuple[SceneMiddleware, ...] = ()
     tags: frozenset[str] = frozenset()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     setup: ModuleSetup | None = None
@@ -80,6 +107,7 @@ class SceneModule:
             description=self.description,
             services=merged,
             menu_entries=self.menu_entries,
+            middlewares=self.middlewares,
             tags=self.tags,
             metadata=self.metadata,
             setup=self.setup,
@@ -93,6 +121,21 @@ class SceneModule:
             description=self.description,
             services=self.services,
             menu_entries=(*self.menu_entries, *entries),
+            middlewares=self.middlewares,
+            tags=self.tags,
+            metadata=self.metadata,
+            setup=self.setup,
+        )
+
+    def with_middlewares(self, *middlewares: SceneMiddleware) -> SceneModule:
+        return SceneModule(
+            name=self.name,
+            package_name=self.package_name,
+            title=self.title,
+            description=self.description,
+            services=self.services,
+            menu_entries=self.menu_entries,
+            middlewares=(*self.middlewares, *middlewares),
             tags=self.tags,
             metadata=self.metadata,
             setup=self.setup,

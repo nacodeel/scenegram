@@ -10,7 +10,7 @@ from aiogram import F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.scene import Scene, on
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 try:
     from aiogram.utils.chat_action import ChatActionSender
@@ -25,6 +25,7 @@ from .history import SceneHistoryProxy
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import RUNTIME
 from .ui.callbacks import Navigate
+from .ui.keyboards import uses_message_reply_markup
 
 ModelT = TypeVar("ModelT")
 BACK_TARGET_HOME = "__scenegram_home__"
@@ -221,6 +222,7 @@ class SceneNavigator:
 class AppScene(Scene, reset_history_on_enter=False):
     __abstract__ = True
     entrypoints: tuple[Any, ...] = ()
+    middlewares: tuple[Any, ...] = ()
     roles = frozenset({SceneRole.ANY.value})
     home_for_roles = frozenset()
     home_scene: str | None = None
@@ -229,6 +231,8 @@ class AppScene(Scene, reset_history_on_enter=False):
     breadcrumb: str | None = None
     default_chat_action: str | SceneActionConfig | None = None
     chat_actions: Mapping[str, str | SceneActionConfig] = {}
+    cancel_notice_text = "Отменено"
+    home_notice_text = "Открываю меню"
 
     def __init__(self, wizard: Any) -> None:
         super().__init__(wizard)
@@ -368,6 +372,14 @@ class AppScene(Scene, reset_history_on_enter=False):
             )
 
         if isinstance(event, CallbackQuery):
+            if uses_message_reply_markup(reply_markup):
+                if event.message is None:
+                    raise RuntimeError(
+                        "CallbackQuery without message is not supported by AppScene.show"
+                    )
+                await self._cleanup_previous_message(event.message)
+                message = await event.message.answer(**payload)
+                return await self._remember_screen(message, remember=remember)
             return await self._show_callback(event, payload, remember=remember)
 
         await self._cleanup_previous_message(event)
@@ -404,6 +416,25 @@ class AppScene(Scene, reset_history_on_enter=False):
             await message.bot.delete_message(message.chat.id, message.message_id)
         except TelegramBadRequest:
             pass
+
+    async def reply_notice(
+        self,
+        message: Message,
+        content: RenderableText | None,
+        *,
+        remove_reply_keyboard: bool = False,
+        replace_parse_mode: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        payload = render_text(content, replace_parse_mode=replace_parse_mode)
+        if remove_reply_keyboard:
+            payload["reply_markup"] = ReplyKeyboardRemove()
+        payload.update(kwargs)
+
+        reply = getattr(message, "reply", None)
+        if callable(reply):
+            return await reply(**payload)
+        return await message.answer(**payload)
 
     async def resolve_roles(self, event: Any) -> set[str]:
         if RUNTIME.role_resolver is None:
@@ -462,15 +493,34 @@ class AppScene(Scene, reset_history_on_enter=False):
 
     @on.message(Command("cancel"))
     async def _cancel_command(self, message: Message) -> None:
+        await self.reply_notice(
+            message,
+            self.cancel_notice_text,
+            remove_reply_keyboard=True,
+        )
         await self.nav.home()
 
     @on.message(F.text == "Отмена")
     async def _cancel_text(self, message: Message) -> None:
+        await self.reply_notice(
+            message,
+            self.cancel_notice_text,
+            remove_reply_keyboard=True,
+        )
         await self.nav.home()
 
     @on.message(F.text == "Назад")
     async def _back_text(self, message: Message) -> None:
         await self.nav.back()
+
+    @on.message(F.text == "Домой")
+    async def _home_text(self, message: Message) -> None:
+        await self.reply_notice(
+            message,
+            self.home_notice_text,
+            remove_reply_keyboard=True,
+        )
+        await self.nav.home()
 
     async def _show_callback(
         self,

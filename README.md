@@ -9,7 +9,7 @@
 - portable scene modules, которые можно переносить между ботами вместе с логикой;
 - встроенные patterns для menu, pagination, confirm, step, forms, CRUD и background broadcast;
 - нативная поддержка `aiogram.utils.formatting` без собственного markup DSL;
-- service container, module-local adapters, cleanup policies, breadcrumbs/history и chat actions.
+- service container, module-local adapters, cleanup policies, breadcrumbs/history, scene middlewares и chat actions.
 
 ## Что теперь умеет framework
 
@@ -84,7 +84,83 @@ class SurveyScene(FormScene, state="survey.start"):
     )
 ```
 
-### 5. Chat actions
+### 5. Scene middlewares
+
+`scenegram` умеет вешать middleware:
+
+- глобально на весь scenes router через `create_scenes_router(..., middlewares=...)`;
+- локально на конкретную сцену через `Scene.middlewares`;
+- локально на переносимый `SceneModule`, чтобы middleware ехала вместе с модулем.
+
+Под капотом это собирается через обычные aiogram router middlewares (`middleware(...)` / `outer_middleware(...)`), но framework сам создаёт wrapper-router на каждую сцену, поэтому entrypoints и scene handlers проходят через один и тот же pipeline.
+
+```python
+from aiogram import BaseMiddleware
+from scenegram import SceneModule, create_scenes_router, scene_middleware
+
+
+class AuditMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        data["audit_enabled"] = True
+        return await handler(event, data)
+
+
+class SurveyScene(FormScene, state="survey.start"):
+    __abstract__ = False
+    middlewares = (
+        scene_middleware(AuditMiddleware, "message", "callback_query", factory=True),
+    )
+
+
+SCENEGRAM_MODULE = SceneModule(
+    name="survey.module",
+    package_name=__name__,
+    middlewares=(
+        scene_middleware(AuditMiddleware, "message", factory=True),
+    ),
+)
+
+
+create_scenes_router(
+    package_name="bot.scenes",
+    middlewares=(
+        scene_middleware(AuditMiddleware, "message", factory=True),
+    ),
+)
+```
+
+### 6. Reply keyboard на шагах ввода
+
+`StepScene` и `FormScene` теперь умеют автоматически показывать standard reply keyboard на шагах, где у пользователя нет inline-кнопок.
+
+По умолчанию:
+
+- на input screen появляется reply-кнопка `Отмена`;
+- кнопка ловится built-in handler-ом сцены;
+- на cancel framework отправляет `message.reply("Отменено", reply_markup=ReplyKeyboardRemove())`;
+- после этого делает `nav.home()`.
+
+Можно настраивать:
+
+```python
+from scenegram import FormField, FormScene, ReplyButton
+
+
+class SurveyScene(FormScene, state="survey.start"):
+    __abstract__ = False
+    home_scene = "common.start"
+    reply_rows = (
+        (ReplyButton(text="Помощь"),),
+    )
+    reply_navigation_cancel = True
+    fields = (
+        FormField(name="name", prompt="Как вас зовут?"),
+    )
+```
+
+Если scene-level prompt должен полностью отключить auto reply keyboard, можно передать `reply_markup=None` в `self.show(...)` или выставить `use_reply_keyboard = False`.
+
+### 7. Chat actions
 
 Для долгих операций можно декларативно включать `sendChatAction` через `default_chat_action` и `chat_actions`.
 
@@ -101,7 +177,7 @@ class HeavyScene(AppScene, state="heavy.run"):
 
 Framework сам оборачивает `run_operation(...)` в `ChatActionSender`, если для операции задан action.
 
-### 6. Нативный aiogram formatting
+### 8. Нативный aiogram formatting
 
 `scenegram` не подменяет `aiogram.utils.formatting`.
 
@@ -385,6 +461,7 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 - `SceneHistoryProxy`
 - `SceneNavigator`
 - `SceneModule`
+- `SceneMiddleware`
 - `SceneCleanup`
 - `SceneActionConfig`
 - `create_scenes_router(...)`
@@ -405,7 +482,8 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 
 - `Button`, `ReplyButton`
 - `Navigate`, `PageNav`
-- `inline_menu`, `reply_menu`, `nav_row`
+- `inline_menu`, `reply_menu`, `nav_row`, `reply_nav_row`
+- `scene_middleware(...)`
 - `paginate`, `pager_rows`
 
 ## Showcase examples

@@ -13,7 +13,16 @@ from scenegram.bootstrap import (
     discover_scene_descriptors,
     discover_scene_modules,
 )
+from scenegram.contracts import scene_middleware
 from scenegram.runtime import RUNTIME
+
+
+class TaggedMiddleware:
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+
+    async def __call__(self, handler, event, data):
+        return await handler(event, data)
 
 
 def test_discover_scene_descriptors_returns_sorted_states() -> None:
@@ -77,6 +86,32 @@ def test_discover_scene_modules_reads_scenegram_module_manifest() -> None:
 
     assert sorted(modules) == ["fixtures.sample"]
     assert modules["fixtures.sample"].package_name == "tests.fixtures.sample_scenes"
+
+
+def test_create_scenes_router_applies_global_module_and_scene_middlewares() -> None:
+    result = create_scenes_router(
+        package_name="tests.fixtures.sample_scenes",
+        middlewares=(
+            scene_middleware(
+                lambda *, scene=None, module=None: TaggedMiddleware(
+                    f"global:{scene.__name__}:{module.name if module else 'none'}"
+                ),
+                "message",
+                factory=True,
+            ),
+        ),
+    )
+
+    scene_router = next(
+        router for router in result.router.sub_routers if router.name == "scene:common.home"
+    )
+    tags = [middleware.tag for middleware in scene_router.message.outer_middleware._middlewares]
+
+    assert tags == [
+        "global:HomeScene:fixtures.sample",
+        "module:fixtures.sample:HomeScene",
+        "scene:HomeScene",
+    ]
 
 
 def test_command_entry_requires_at_least_one_command() -> None:
