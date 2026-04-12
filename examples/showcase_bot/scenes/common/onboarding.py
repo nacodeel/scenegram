@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from aiogram.utils.formatting import Bold, as_key_value, as_list
 
-from scenegram import Button, FormField, FormScene, Navigate, inline_menu
+from scenegram import Button, FormField, FormScene, Navigate, SceneCleanup, inline_menu
 
 
 @dataclass(slots=True)
@@ -17,6 +17,7 @@ class OnboardingResult:
 class OnboardingScene(FormScene, state="common.onboarding"):
     __abstract__ = False
     home_scene = "common.start"
+    cleanup = SceneCleanup(delete_previous_screen=True, delete_user_messages=True)
     result_model = OnboardingResult
     use_confirm_step = True
     fields = (
@@ -40,6 +41,7 @@ class OnboardingScene(FormScene, state="common.onboarding"):
         return None
 
     async def on_form_submit(self, event, result: OnboardingResult) -> None:
+        await self.services.call("audit_logger", f"onboarding.submit email={result.email}")
         await self.show(
             event,
             as_list(
@@ -47,6 +49,10 @@ class OnboardingScene(FormScene, state="common.onboarding"):
                 as_key_value("Name", result.name),
                 as_key_value("Email", result.email),
                 as_key_value("Goal", result.goal),
+                (
+                    "Сцена использует глобальный service container "
+                    "и удаляет пользовательские сообщения."
+                ),
                 sep="\n\n",
             ),
             reply_markup=inline_menu(

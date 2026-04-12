@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass
 from typing import Any, TypeVar
 
@@ -11,7 +12,16 @@ from aiogram.filters import Command
 from aiogram.fsm.scene import Scene, on
 from aiogram.types import CallbackQuery, Message
 
+try:
+    from aiogram.utils.chat_action import ChatActionSender
+except ImportError:  # pragma: no cover
+    ChatActionSender = None
+
+from ._utils import call_with_optional_args
+from .contracts import SceneActionConfig, SceneCleanup, SceneModule
+from .di import UNSET, MissingServiceError, resolve_service_value
 from .formatting import RenderableText, render_text
+from .history import SceneHistoryProxy
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import RUNTIME
 from .ui.callbacks import Navigate
@@ -93,6 +103,21 @@ class SceneDataProxy:
         return model_cls(**data)
 
 
+class SceneServicesProxy:
+    def __init__(self, scene: AppScene) -> None:
+        self.scene = scene
+
+    async def get(self, key: str, default: Any | None = None) -> Any:
+        return await self.scene.resolve_service(key, default=default)
+
+    async def require(self, key: str) -> Any:
+        return await self.scene.require_service(key)
+
+    async def call(self, key: str, *args: Any) -> Any:
+        callback = await self.require(key)
+        return await call_with_optional_args(callback, *args)
+
+
 class SceneNavigator:
     def __init__(self, scene: AppScene) -> None:
         self.scene = scene
@@ -101,6 +126,7 @@ class SceneNavigator:
         await self.scene.wizard.goto(target, **kwargs)
 
     async def back(self, **kwargs: Any) -> None:
+        await self.scene.history.pop()
         await self.scene.wizard.back(**kwargs)
 
     async def retake(self, **kwargs: Any) -> None:
@@ -134,11 +160,119 @@ class AppScene(Scene, reset_history_on_enter=False):
     roles = frozenset({SceneRole.ANY.value})
     home_for_roles = frozenset()
     home_scene: str | None = None
+    scene_module: str | None = None
+    cleanup = SceneCleanup()
+    breadcrumb: str | None = None
+    default_chat_action: str | SceneActionConfig | None = None
+    chat_actions: Mapping[str, str | SceneActionConfig] = {}
 
     def __init__(self, wizard: Any) -> None:
         super().__init__(wizard)
         self.data = SceneDataProxy(wizard)
+        self.services = SceneServicesProxy(self)
+        self.history = SceneHistoryProxy(self.data)
         self.nav = SceneNavigator(self)
+
+    @property
+    def state_id(self) -> str:
+        scene_config = getattr(self, "__scene_config__", None)
+        return getattr(scene_config, "state", self.__class__.__name__)
+
+    @property
+    def module(self) -> SceneModule | None:
+        if self.scene_module:
+            return RUNTIME.modules.get(self.scene_module)
+        return RUNTIME.module_for_state(self.state_id)
+
+    @property
+    def runtime(self):
+        return RUNTIME
+
+    def cleanup_policy(self) -> SceneCleanup:
+        return self.runtime.merge_cleanup(self.cleanup)
+
+    def action_config_for(
+        self,
+        operation: str | None = None,
+        override: str | SceneActionConfig | None = None,
+    ) -> SceneActionConfig | None:
+        value = override
+        if value is None and operation is not None:
+            value = self.chat_actions.get(operation)
+        if value is None:
+            value = self.default_chat_action
+        if value is None:
+            return None
+        if isinstance(value, SceneActionConfig):
+            return value
+        return SceneActionConfig(action=str(value))
+
+    @asynccontextmanager
+    async def chat_action(
+        self,
+        event: Message | CallbackQuery | None,
+        action: str | SceneActionConfig | None = None,
+    ):
+        config = self.action_config_for(override=action)
+        message = event.message if isinstance(event, CallbackQuery) else event
+
+        if (
+            config is None
+            or not config.enabled
+            or message is None
+            or ChatActionSender is None
+            or getattr(message, "bot", None) is None
+            or getattr(message, "chat", None) is None
+        ):
+            yield
+            return
+
+        sender_kwargs = {
+            "bot": message.bot,
+            "chat_id": message.chat.id,
+            "action": config.action,
+            "interval": config.interval,
+            "initial_sleep": config.initial_sleep,
+        }
+        thread_id = getattr(message, "message_thread_id", None)
+        if thread_id is not None:
+            sender_kwargs["message_thread_id"] = thread_id
+
+        async with ChatActionSender(**sender_kwargs):
+            yield
+
+    async def run_operation(
+        self,
+        operation: str,
+        event: Message | CallbackQuery | None,
+        callback: Any,
+        *args: Any,
+        action: str | SceneActionConfig | None = None,
+    ) -> Any:
+        config = self.action_config_for(operation=operation, override=action)
+        async with self.chat_action(event, config):
+            return await call_with_optional_args(callback, *args)
+
+    async def resolve_service(self, key: str, default: Any = UNSET) -> Any:
+        module = self.module
+
+        if module and key in module.services:
+            return await resolve_service_value(module.services[key], scene=self, module=module)
+
+        value = self.runtime.service_container.resolve(
+            key,
+            scene=self,
+            module=module,
+            default=default,
+        )
+        if value is UNSET:
+            raise MissingServiceError(key)
+        if value is default:
+            return default
+        return await resolve_service_value(value, scene=self, module=module)
+
+    async def require_service(self, key: str) -> Any:
+        return await self.resolve_service(key)
 
     async def show(
         self,
@@ -148,12 +282,22 @@ class AppScene(Scene, reset_history_on_enter=False):
         reply_markup: Any | None = None,
         remember: bool = True,
         replace_parse_mode: bool = True,
+        remember_history: bool | None = None,
+        breadcrumb_label: str | None = None,
         **kwargs: Any,
     ) -> Any:
         payload = render_text(content, replace_parse_mode=replace_parse_mode)
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         payload.update(kwargs)
+
+        if remember_history is None:
+            remember_history = self.cleanup_policy().remember_history is not False
+        if remember_history:
+            await self.history.replace_current(
+                self.state_id,
+                breadcrumb_label or await self.breadcrumb_label(event, content),
+            )
 
         if isinstance(event, CallbackQuery):
             return await self._show_callback(event, payload, remember=remember)
@@ -162,6 +306,17 @@ class AppScene(Scene, reset_history_on_enter=False):
         message = await event.answer(**payload)
         return await self._remember_screen(message, remember=remember)
 
+    async def breadcrumb_label(
+        self,
+        event: Message | CallbackQuery,
+        content: RenderableText | None,
+    ) -> str:
+        if self.breadcrumb:
+            return self.breadcrumb
+        payload = render_text(content, replace_parse_mode=False)
+        text = payload.get("text", "") or self.state_id
+        return text.splitlines()[0][:64] or self.state_id
+
     async def cleanup_screen(self, message: Message) -> None:
         previous_message_id = await self.data.get("_screen_message_id")
         if previous_message_id and getattr(message, "bot", None):
@@ -169,6 +324,18 @@ class AppScene(Scene, reset_history_on_enter=False):
                 await message.bot.delete_message(message.chat.id, previous_message_id)
             except TelegramBadRequest:
                 pass
+
+    async def cleanup_user_message(self, message: Message) -> None:
+        if self.cleanup_policy().delete_user_messages is not True:
+            return
+        if getattr(message, "bot", None) is None:
+            return
+        if getattr(message, "message_id", None) is None:
+            return
+        try:
+            await message.bot.delete_message(message.chat.id, message.message_id)
+        except TelegramBadRequest:
+            pass
 
     async def resolve_roles(self, event: Any) -> set[str]:
         if RUNTIME.role_resolver is None:
@@ -252,6 +419,8 @@ class AppScene(Scene, reset_history_on_enter=False):
         return await self._remember_screen(message, remember=remember)
 
     async def _cleanup_previous_message(self, message: Message) -> None:
+        if self.cleanup_policy().delete_previous_screen is not True:
+            return
         previous_message_id = await self.data.get("_screen_message_id")
         if previous_message_id and getattr(message, "bot", None):
             try:
@@ -260,6 +429,6 @@ class AppScene(Scene, reset_history_on_enter=False):
                 pass
 
     async def _remember_screen(self, message: Any, *, remember: bool) -> Any:
-        if remember and hasattr(message, "message_id"):
+        if remember and getattr(message, "message_id", None) is not None:
             await self.data.update(_screen_message_id=message.message_id)
         return message

@@ -1,16 +1,32 @@
 # Examples
 
-`scenegram` предполагает, что в вашем боте есть собственный пакет `scenes/`, а сама библиотека только поставляет базовые классы, helpers и bootstrap.
+Каталог `examples/` содержит reference implementations того, как `scenegram` должен использоваться внутри реального бота.
 
-В этом каталоге лежит один полноформатный пример:
+## Что находится в примерах
 
-- `showcase_bot/` — реальная структура бота с `main.py`, пакетом `scenes/`, автоматическим discovery, ролями, `MenuScene`, `PaginatedScene`, `ConfirmScene`, `FormScene`, `StepScene` и нативным форматированием через `aiogram.utils.formatting`.
+- `showcase_bot/` — основной reference bot.
 
-Запускать пример удобнее так:
+## Что показывает showcase bot
+
+- bootstrap `Dispatcher` с `create_scenes_router(...)`;
+- глобальный `service_container`;
+- auto-discovery сцен по пакету `examples.showcase_bot.scenes`;
+- mix ручных сцен и portable scene modules;
+- cleanup policies и history-ready rendering;
+- формы, пагинацию, CRUD pack и background broadcast.
+
+## Быстрый запуск
 
 ```bash
-cd scenegram
+cd /Users/nikita/Projects/aioscene/scenegram
 BOT_TOKEN=... python -m examples.showcase_bot.main
 ```
 
-Он предназначен не как demo-игрушка, а как reference implementation того, как должен выглядеть проект, где пользователь просто добавляет свою папку `scenes/` и наполняет ее модулями.
+## Для чего читать этот каталог
+
+Это не toy demo. Пример собран так, чтобы разработчик мог:
+
+- взять структуру папок как основу своего бота;
+- скопировать portable module целиком;
+- посмотреть, как пробрасывать adapters и глобальные сервисы;
+- увидеть, как использовать `aiogram.utils.formatting` напрямую в сценах.

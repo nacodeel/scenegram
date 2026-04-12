@@ -11,9 +11,12 @@ from scenegram import (
     Button,
     ConfirmAction,
     ConfirmScene,
+    MappingContainer,
+    MenuContribution,
     MenuScene,
     Navigate,
     PaginatedScene,
+    SceneModule,
     SceneRole,
     StepScene,
 )
@@ -92,6 +95,13 @@ async def test_show_deletes_previous_message_and_remembers_new_one(wizard) -> No
     assert wizard.data["_screen_message_id"] == 88
 
 
+def test_scene_cleanup_policy_inherits_runtime_defaults(wizard) -> None:
+    scene = DemoScene(wizard)
+
+    assert scene.cleanup_policy().delete_previous_screen is True
+    assert scene.cleanup_policy().remember_history is True
+
+
 @pytest.mark.asyncio
 async def test_show_supports_aiogram_formatting_entities(wizard) -> None:
     from tests.conftest import FakeMessage
@@ -137,6 +147,79 @@ async def test_menu_scene_combines_static_rows_and_navigation(wizard) -> None:
     assert markup.inline_keyboard[0][0].text == "Open"
     assert markup.inline_keyboard[1][0].callback_data == Navigate.back().pack()
     assert markup.inline_keyboard[1][1].callback_data == Navigate.home("tests.demo").pack()
+
+
+@pytest.mark.asyncio
+async def test_menu_scene_includes_module_contributions_by_row_and_order(wizard) -> None:
+    RUNTIME.reset()
+    RUNTIME.role_resolver = lambda event: {SceneRole.ADMIN.value}
+    RUNTIME.register_modules(
+        [
+            SceneModule(
+                name="tests.menu.module",
+                package_name="tests.fixtures.sample_scenes",
+                menu_entries=(
+                    MenuContribution(
+                        target_state="tests.menu",
+                        text="Reports",
+                        target_scene="tests.reports",
+                        row=1,
+                        order=20,
+                    ),
+                    MenuContribution(
+                        target_state="tests.menu",
+                        text="Users",
+                        target_scene="tests.users",
+                        row=1,
+                        order=10,
+                    ),
+                    MenuContribution(
+                        target_state="tests.menu",
+                        text="Settings",
+                        target_scene="tests.settings",
+                    ),
+                    MenuContribution(
+                        target_state="tests.menu",
+                        text="Admin only",
+                        target_scene="tests.admin",
+                        roles=frozenset({SceneRole.ADMIN.value}),
+                        row=0,
+                        order=5,
+                    ),
+                ),
+            )
+        ]
+    )
+    scene = DemoMenuScene(wizard)
+
+    markup = await scene.menu_markup(SimpleNamespace())
+
+    assert [button.text for button in markup.inline_keyboard[0]] == ["Open"]
+    assert [button.text for button in markup.inline_keyboard[1]] == ["Admin only"]
+    assert [button.text for button in markup.inline_keyboard[2]] == ["Users", "Reports"]
+    assert [button.text for button in markup.inline_keyboard[3]] == ["Settings"]
+
+
+@pytest.mark.asyncio
+async def test_scene_prefers_module_services_and_falls_back_to_container(wizard) -> None:
+    RUNTIME.reset()
+    RUNTIME.service_container = MappingContainer(
+        {"sample_service": "global-value", "fallback_service": "fallback-value"}
+    )
+    RUNTIME.register_modules(
+        [
+            SceneModule(
+                name="tests.module",
+                package_name="tests.fixtures.sample_scenes",
+                services={"sample_service": lambda: "module-value"},
+            )
+        ]
+    )
+    RUNTIME.bind_scene_module("tests.demo", "tests.module")
+    scene = DemoScene(wizard)
+
+    assert await scene.require_service("sample_service") == "module-value"
+    assert await scene.require_service("fallback_service") == "fallback-value"
 
 
 @pytest.mark.asyncio

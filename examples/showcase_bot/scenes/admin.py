@@ -21,6 +21,7 @@ class AdminDashboardScene(MenuScene, state="admin.dashboard"):
                 "Роль ограничена через role_resolver",
                 "Сцена нашлась автоматически по пакету scenes",
                 "Навигация собирается базовым классом",
+                "Рассылка ниже подключается как portable module через menu contribution",
             ),
             sep="\n\n",
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,8 +11,10 @@ from aiogram import Router
 from aiogram.filters import Command, Filter
 from aiogram.fsm.scene import SceneRegistry
 
+from .contracts import SceneCleanup, SceneModule
+from .di import adapt_container
 from .roles import SceneRole, normalize_role, normalize_roles
-from .runtime import RUNTIME, RoleResolver
+from .runtime import DEFAULT_CLEANUP, RUNTIME, RoleResolver
 
 
 @dataclass(slots=True)
@@ -31,6 +33,7 @@ class SceneDescriptor:
     home_scene: str | None
     home_for_roles: frozenset[str]
     entrypoints: tuple[EntryPoint, ...]
+    scene_module: str | None = None
 
 
 @dataclass(slots=True)
@@ -40,6 +43,7 @@ class SceneBootstrapResult:
     scenes: list[type]
     descriptors: list[SceneDescriptor]
     scene_map: dict[str, type]
+    modules: dict[str, SceneModule]
 
 
 class RoleAllowed(Filter):
@@ -126,11 +130,53 @@ def _discover_modules(package_name: str) -> list[str]:
     return module_names
 
 
+def discover_scene_modules(
+    package_name: str | Sequence[str],
+    *,
+    extra_modules: Sequence[SceneModule] | None = None,
+) -> dict[str, SceneModule]:
+    discovered: dict[str, SceneModule] = {}
+
+    for root_package in _normalize_packages(package_name):
+        for module_name in _discover_modules(root_package):
+            module = importlib.import_module(module_name)
+            candidate = getattr(module, "SCENEGRAM_MODULE", None)
+            if isinstance(candidate, SceneModule):
+                discovered[candidate.name] = candidate
+
+    for module in extra_modules or ():
+        discovered[module.name] = module
+
+    return discovered
+
+
+def _match_scene_module(scene_cls: type, modules: Mapping[str, SceneModule]) -> str | None:
+    explicit = getattr(scene_cls, "scene_module", None)
+    if explicit:
+        return explicit
+
+    matched_name: str | None = None
+    matched_length = -1
+    module_name = scene_cls.__module__
+
+    for scene_module in modules.values():
+        prefix = scene_module.package_name
+        if module_name == prefix or module_name.startswith(f"{prefix}."):
+            if len(prefix) > matched_length:
+                matched_name = scene_module.name
+                matched_length = len(prefix)
+
+    return matched_name
+
+
 def discover_scene_descriptors(
     package_name: str | Sequence[str],
     base_scene_cls: type,
+    *,
+    modules: Mapping[str, SceneModule] | None = None,
 ) -> list[SceneDescriptor]:
     descriptors: dict[str, SceneDescriptor] = {}
+    modules = modules or {}
 
     for root_package in _normalize_packages(package_name):
         for module_name in _discover_modules(root_package):
@@ -151,6 +197,8 @@ def discover_scene_descriptors(
                 if not state:
                     continue
 
+                scene_module = _match_scene_module(candidate, modules)
+
                 descriptors[state] = SceneDescriptor(
                     state=state,
                     scene=candidate,
@@ -159,6 +207,7 @@ def discover_scene_descriptors(
                     home_scene=getattr(candidate, "home_scene", None),
                     home_for_roles=normalize_roles(getattr(candidate, "home_for_roles", set())),
                     entrypoints=tuple(getattr(candidate, "entrypoints", ())),
+                    scene_module=scene_module,
                 )
 
     return [descriptors[state] for state in sorted(descriptors)]
@@ -167,8 +216,10 @@ def discover_scene_descriptors(
 def discover_scene_classes(
     package_name: str | Sequence[str],
     base_scene_cls: type,
+    *,
+    modules: Mapping[str, SceneModule] | None = None,
 ) -> list[type]:
-    descriptors = discover_scene_descriptors(package_name, base_scene_cls)
+    descriptors = discover_scene_descriptors(package_name, base_scene_cls, modules=modules)
     return [descriptor.scene for descriptor in descriptors]
 
 
@@ -178,6 +229,9 @@ def create_scenes_router(
     role_resolver: RoleResolver | None = None,
     default_home: str | None = None,
     base_scene_cls: type | None = None,
+    service_container: Any | None = None,
+    scene_modules: Sequence[SceneModule] | None = None,
+    cleanup: SceneCleanup | None = None,
 ) -> SceneBootstrapResult:
     from .base import AppScene
 
@@ -185,17 +239,28 @@ def create_scenes_router(
     root_router = Router(name="scenes")
     registry = SceneRegistry(root_router, register_on_add=False)
 
+    discovered_modules = discover_scene_modules(package_name, extra_modules=scene_modules)
+    descriptors = discover_scene_descriptors(
+        package_name,
+        base_scene_cls,
+        modules=discovered_modules,
+    )
+    scenes = [descriptor.scene for descriptor in descriptors]
+
+    RUNTIME.reset()
     RUNTIME.role_resolver = role_resolver
     RUNTIME.default_home = default_home
-    RUNTIME.home_by_role.clear()
+    RUNTIME.service_container = adapt_container(service_container)
+    RUNTIME.cleanup = cleanup or DEFAULT_CLEANUP
+    RUNTIME.register_modules(discovered_modules.values())
 
     grouped_routers: dict[tuple[str, ...], Router] = {}
-    descriptors = discover_scene_descriptors(package_name, base_scene_cls)
-    scenes = [descriptor.scene for descriptor in descriptors]
 
     for descriptor in descriptors:
         scene_cls = descriptor.scene
         allowed_roles = descriptor.roles
+
+        RUNTIME.bind_scene_module(descriptor.state, descriptor.scene_module)
 
         for role in descriptor.home_for_roles:
             RUNTIME.home_by_role[role] = descriptor.state
@@ -227,4 +292,5 @@ def create_scenes_router(
         scenes=scenes,
         descriptors=descriptors,
         scene_map={descriptor.state: descriptor.scene for descriptor in descriptors},
+        modules=discovered_modules,
     )

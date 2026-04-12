@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from scenegram.runtime import RUNTIME
+
 
 class WizardStub:
     def __init__(self, data: dict[str, Any] | None = None) -> None:
@@ -106,3 +108,10 @@ class FakeCallbackQuery:
 @pytest.fixture
 def wizard() -> WizardStub:
     return WizardStub()
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime() -> None:
+    RUNTIME.reset()
+    yield
+    RUNTIME.reset()

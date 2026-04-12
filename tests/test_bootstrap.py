@@ -11,6 +11,7 @@ from scenegram.bootstrap import (
     create_scenes_router,
     discover_scene_classes,
     discover_scene_descriptors,
+    discover_scene_modules,
 )
 from scenegram.runtime import RUNTIME
 
@@ -40,6 +41,8 @@ def test_create_scenes_router_returns_scene_map() -> None:
 
     assert sorted(result.scene_map) == ["admin.dashboard", "common.catalog", "common.home"]
     assert result.scenes == list(result.scene_map.values())
+    assert sorted(result.modules) == ["fixtures.sample"]
+    assert result.modules["fixtures.sample"].metadata["kind"] == "fixtures"
 
 
 def test_create_scenes_router_accepts_multiple_packages() -> None:
@@ -67,6 +70,13 @@ def test_create_scenes_router_registers_role_homes() -> None:
         SceneRole.MANAGER.value: "manager.dashboard",
         SceneRole.USER.value: "common.home",
     }
+
+
+def test_discover_scene_modules_reads_scenegram_module_manifest() -> None:
+    modules = discover_scene_modules("tests.fixtures.sample_scenes")
+
+    assert sorted(modules) == ["fixtures.sample"]
+    assert modules["fixtures.sample"].package_name == "tests.fixtures.sample_scenes"
 
 
 def test_command_entry_requires_at_least_one_command() -> None:

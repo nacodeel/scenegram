@@ -1,35 +1,67 @@
 # Package Notes
 
-Пакет `scenegram/` содержит framework-level код, который должен оставаться переносимым между ботами.
+Папка `scenegram/` содержит framework-level код, который должен оставаться переносимым между ботами и не тянуть в себя бизнес-логику конкретного проекта.
 
-## Что лежит внутри
+## Содержимое пакета
 
-- `base.py` — базовая сцена, state proxy, navigation helpers;
-- `bootstrap.py` — discovery, descriptors, entrypoints, scene router assembly;
-- `formatting.py` — внутренний render helper, который обеспечивает поддержку `aiogram.utils.formatting` в `show(...)`;
-- `patterns.py` — built-in scene patterns (`MenuScene`, `ConfirmScene`, `StepScene`, `FormScene`);
-- `ui/` — callback data, keyboard builders, pagination helpers;
-- `roles.py`, `runtime.py` — role-scoped routing runtime.
+- `base.py` — `AppScene`, data/services/history/navigation proxies, render pipeline, cleanup, chat actions.
+- `bootstrap.py` — discovery, descriptors, role-aware router assembly, scene registry bootstrap.
+- `contracts.py` — typed contracts для scene modules, menu contributions, cleanup, CRUD и broadcast adapters.
+- `di.py` — mapping/composite/null containers и service resolution helpers.
+- `runtime.py` — shared runtime, cleanup defaults, module registry, menu contribution routing, task runner.
+- `history.py` — breadcrumbs/history proxy поверх scene data.
+- `tasks.py` — in-process background task runner для модульных сцен.
+- `patterns.py` — `MenuScene`, `ConfirmScene`, `StepScene`, `FormScene`.
+- `packs.py` — built-in CRUD scene pack и `crud_module(...)`.
+- `background.py` — `BroadcastScene` и `broadcast_module(...)`.
+- `ui/` — keyboard builders, callback payloads, pagination helpers.
 
-## Правила расширения
+## Архитектурная роль
 
-- не тащить в пакет бизнес-логику конкретного бота;
-- не хардкодить сервисы, репозитории или доменные модели;
-- новые built-in scenes должны быть переиспользуемыми и автономными;
-- formatting support должен оставаться совместимым с прямым использованием `aiogram.utils.formatting`;
-- discovery/bootstrap не должны требовать ручного реестра сцен.
+Пакет является reusable scene framework-слоем. Его задача:
+
+- дать устойчивую абстракцию поверх aiogram scenes;
+- не дублировать официальный API aiogram без необходимости;
+- поддерживать нативный `aiogram.utils.formatting`;
+- предоставлять переносимые building blocks для меню, форм, CRUD и background сценариев;
+- оставаться совместимым с разными ботами через DI и module manifests.
 
 ## Что уже реализовано
 
-- auto-discovery сцен по пакету;
-- role-aware bootstrap;
-- top-level imports из `scenegram`;
-- built-in menu/confirm/pagination/step/form patterns;
-- typed helpers для state, navigation и formatting;
-- тестовое покрытие ключевых слоев.
+- auto-discovery и auto-registration сцен;
+- role-aware routing и home scenes;
+- service container + module-local services;
+- cleanup policies и breadcrumbs/history;
+- declarative chat actions;
+- step/forms с typed result model;
+- portable CRUD and broadcast packs;
+- top-level public API через `scenegram.__init__`.
 
-## Следующий этап
+## Что ещё не реализовано
 
-- дополнительные reusable scenes для list/detail/selection flows;
-- richer step/form widgets;
-- больше observability hooks для production integration.
+- adapters для внешних DI frameworks;
+- declarative field widgets beyond text input;
+- selection/list picker packs;
+- built-in persistence/queue backends для background jobs.
+
+## Важные технические решения
+
+- formatting не оборачивается в новый публичный DSL; поддерживается нативный aiogram `Text`.
+- runtime остаётся process-local и лёгким; тяжёлые очереди пользователь подключает через свои adapters.
+- scene packs не зависят от ORM/БД; всё доменное поведение идёт через adapters/services.
+- module manifests завязаны на package prefix, чтобы сцены автоматически связывались со своим модулем.
+
+## Правила расширения
+
+- не добавлять сюда доменные сущности конкретных ботов;
+- не хардкодить infra adapters под один стек;
+- новые packs должны быть самодостаточными и переносимыми;
+- любой новый runtime hook обязан иметь тесты;
+- при значимых изменениях обновлять этот README и корневой README.
+
+## Ближайшие планы
+
+- расширить declarative form layer;
+- добавить scene packs для selection/filter/detail workflows;
+- усилить observability hooks;
+- подготовить отдельные adapters для популярных service containers.

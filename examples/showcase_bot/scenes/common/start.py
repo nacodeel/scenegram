@@ -17,8 +17,10 @@ class StartScene(MenuScene, state="common.start"):
                 Bold("Внутри этой сцены"),
                 as_marked_list(
                     "авто-discovery по вашему пакету scenes",
+                    "menu contributions от portable scene modules",
+                    "service container и module-local adapters",
                     "форматирование через aiogram entities вместо HTML/Markdown",
-                    "готовые MenuScene / PaginatedScene / ConfirmScene / FormScene",
+                    "готовые MenuScene / PaginatedScene / CRUD / Broadcast / FormScene",
                 ),
             ),
             HashTag("#scenegram"),
@@ -27,8 +29,8 @@ class StartScene(MenuScene, state="common.start"):
 
     async def menu_rows(self, event):
         rows = [
-            [Button(text="📦 Каталог", callback_data=Navigate.open("common.catalog"))],
             [Button(text="🧭 Анкета", callback_data=Navigate.open("common.onboarding"))],
+            [Button(text="📄 Пагинация", callback_data=Navigate.open("common.catalog"))],
             [Button(text="🗑 Очистить черновик", callback_data=Navigate.open("common.delete"))],
         ]
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
@@ -18,33 +17,10 @@ from .ui import Button, inline_menu, nav_row
 type FormHook = str | Callable[..., Any]
 
 
-def _positional_arity(callback: Callable[..., Any]) -> int | None:
-    signature = inspect.signature(callback)
-    parameters = list(signature.parameters.values())
-
-    if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
-        return None
-
-    return len(
-        [
-            parameter
-            for parameter in parameters
-            if parameter.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-        ]
-    )
-
-
-async def _call_hook(callback: Callable[..., Any], *args: Any) -> Any:
-    arity = _positional_arity(callback)
-    call_args = args if arity is None else args[:arity]
-    result = callback(*call_args)
-    if inspect.isawaitable(result):
-        return await result
-    return result
+def _hook_name(hook: FormHook) -> str:
+    if isinstance(hook, str):
+        return hook
+    return getattr(hook, "__name__", "hook")
 
 
 class MenuScene(AppScene):
@@ -56,6 +32,7 @@ class MenuScene(AppScene):
     navigation_home = False
     navigation_cancel = False
     navigation_home_target = ""
+    include_module_menu = True
 
     async def menu_content(self, event: Message | CallbackQuery) -> RenderableText | None:
         return self.menu_text
@@ -63,8 +40,39 @@ class MenuScene(AppScene):
     async def menu_rows(self, event: Message | CallbackQuery) -> list[list[Button]]:
         return [list(row) for row in self.static_rows]
 
+    async def contributed_rows(self, event: Message | CallbackQuery) -> list[list[Button]]:
+        if not self.include_module_menu:
+            return []
+
+        indexed_rows: dict[int, list[Button]] = {}
+        trailing_rows: list[list[Button]] = []
+        for contribution in self.module_menu_entries(self.state_id):
+            if contribution.roles and "any" not in contribution.roles:
+                if not await self.has_any_role(event, contribution.roles):
+                    continue
+            button = Button(text=contribution.text, callback_data=self._menu_nav(contribution))
+            if contribution.row is None:
+                trailing_rows.append([button])
+                continue
+            indexed_rows.setdefault(contribution.row, []).append(button)
+
+        rows = [indexed_rows[index] for index in sorted(indexed_rows)]
+        rows.extend(trailing_rows)
+        return rows
+
+    def _menu_nav(self, contribution: Any) -> Any:
+        from .ui.callbacks import Navigate
+
+        return Navigate.open(contribution.target_scene)
+
+    def module_menu_entries(self, state: str) -> list[Any]:
+        from .runtime import RUNTIME
+
+        return RUNTIME.menu_entries_for(state)
+
     async def menu_markup(self, event: Message | CallbackQuery):
         rows = await self.menu_rows(event)
+        rows.extend(await self.contributed_rows(event))
         navigation = nav_row(
             back=self.navigation_back,
             home=self.navigation_home,
@@ -138,12 +146,12 @@ class ConfirmScene(AppScene):
     @on.callback_query(ConfirmAction.filter(F.action == "confirm"))
     async def _confirm_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.on_confirm(call)
+        await self.run_operation("on_confirm", call, self.on_confirm, call)
 
     @on.callback_query(ConfirmAction.filter(F.action == "cancel"))
     async def _reject_action(self, call: CallbackQuery) -> None:
         await call.answer(self.reject_notice)
-        await self.on_reject(call)
+        await self.run_operation("on_reject", call, self.on_reject, call)
 
 
 class StepAction(CallbackData, prefix="step"):
@@ -217,7 +225,7 @@ class StepScene(AppScene):
     async def render_current_step(self, event: Message | CallbackQuery) -> Any:
         step_name = await self.current_step()
         renderer = getattr(self, step_name)
-        return await renderer(event)
+        return await self.run_operation(step_name, event, renderer, event)
 
     async def next_step(self, event: Message | CallbackQuery, **data: Any) -> Any:
         steps = self.declared_steps()
@@ -226,7 +234,7 @@ class StepScene(AppScene):
         if data:
             await self.data.update(data)
         if index + 1 >= len(steps):
-            return await self.on_complete(event)
+            return await self.run_operation("on_complete", event, self.on_complete, event)
 
         next_step_name = steps[index + 1]
         await self.set_step(next_step_name)
@@ -273,14 +281,17 @@ class StepScene(AppScene):
         handler = getattr(self, f"handle_{step_name}", None)
 
         if handler is not None:
-            await handler(message)
+            await self.run_operation(f"handle_{step_name}", message, handler, message)
+            await self.cleanup_user_message(message)
             return
 
         await self.handle_step_input(message, step_name)
+        await self.cleanup_user_message(message)
 
     @on.message()
     async def _on_unsupported_input(self, message: Message) -> None:
         await self.show(message, "Для этого шага ожидается текстовый ответ.")
+        await self.cleanup_user_message(message)
 
     @on.callback_query(StepAction.filter(F.action == "next"))
     async def _next_action(self, call: CallbackQuery) -> None:
@@ -360,7 +371,12 @@ class FormScene(StepScene):
     async def render_current_step(self, event: Message | CallbackQuery) -> Any:
         step_name = await self.current_step()
         if step_name == self.confirm_step_name:
-            return await self.render_confirmation(event)
+            return await self.run_operation(
+                "render_confirmation",
+                event,
+                self.render_confirmation,
+                event,
+            )
 
         field = self.field_by_step(step_name)
         return await self.show(
@@ -398,7 +414,14 @@ class FormScene(StepScene):
             return raw_value
 
         hook = self._resolve_form_hook(field.parser)
-        return await _call_hook(hook, raw_value, message, field)
+        return await self.run_operation(
+            _hook_name(field.parser),
+            message,
+            hook,
+            raw_value,
+            message,
+            field,
+        )
 
     async def validate_field_value(
         self,
@@ -410,7 +433,14 @@ class FormScene(StepScene):
             return None
 
         hook = self._resolve_form_hook(field.validator)
-        result = await _call_hook(hook, value, message, field)
+        result = await self.run_operation(
+            _hook_name(field.validator),
+            message,
+            hook,
+            value,
+            message,
+            field,
+        )
 
         if result in (None, True):
             return None
@@ -423,7 +453,7 @@ class FormScene(StepScene):
             return "" if value is None else str(value)
 
         hook = self._resolve_form_hook(field.formatter)
-        result = await _call_hook(hook, value, field)
+        result = await self.run_operation(_hook_name(field.formatter), None, hook, value, field)
         return "" if result is None else str(result)
 
     async def form_values(self) -> dict[str, Any]:
@@ -458,11 +488,10 @@ class FormScene(StepScene):
         return as_list(*rows, sep="\n\n")
 
     async def confirm_rows(self, event: Message | CallbackQuery) -> list[list[Button]]:
-        rows = [
+        return [
             [Button(text=self.submit_button_text, callback_data=FormAction(action="submit"))],
             [Button(text=self.edit_button_text, callback_data=FormAction(action="edit"))],
         ]
-        return rows
 
     async def render_confirmation(self, event: Message | CallbackQuery) -> Any:
         return await self.show(
@@ -473,7 +502,7 @@ class FormScene(StepScene):
 
     async def submit_form(self, event: Message | CallbackQuery) -> Any:
         result = await self.form_result()
-        return await self.on_form_submit(event, result)
+        return await self.run_operation("on_form_submit", event, self.on_form_submit, event, result)
 
     async def on_form_submit(self, event: Message | CallbackQuery, result: Any) -> Any:
         await self.nav.exit()

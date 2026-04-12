@@ -6,7 +6,9 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 
-from scenegram import SceneRole, create_scenes_router
+from scenegram import SceneCleanup, SceneRole, create_scenes_router
+
+from .services import build_service_container
 
 
 async def resolve_roles(event):
@@ -29,6 +31,12 @@ def create_dispatcher() -> Dispatcher:
         package_name="examples.showcase_bot.scenes",
         role_resolver=resolve_roles,
         default_home="common.start",
+        service_container=build_service_container(),
+        cleanup=SceneCleanup(
+            delete_previous_screen=True,
+            delete_user_messages=False,
+            remember_history=True,
+        ),
     )
     dispatcher.include_router(scenes.router)
     return dispatcher
