@@ -5,6 +5,7 @@ import pytest
 import scenegram.base as base_module
 import scenegram.packs as packs_module
 from scenegram import (
+    BACK_TARGET_HOME,
     RUNTIME,
     BroadcastReport,
     BroadcastResult,
@@ -209,4 +210,42 @@ async def test_crud_delete_scene_redirects_when_item_was_removed(wizard, monkeyp
 
     assert wizard.goto_calls == [("tests.crud.list", {})]
     assert "item_id" not in wizard.data
+    assert call.answer_calls[-1] == scene.missing_item_notice
+
+
+@pytest.mark.asyncio
+async def test_crud_delete_scene_sets_back_target_after_successful_delete(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoCrudDeleteScene(wizard)
+    scene.home_scene = "tests.home"
+    call = FakeCallbackQuery()
+
+    wizard.data = {"item_id": "42"}
+    await scene.on_confirm(call)
+
+    assert wizard.data["_back_target"] == BACK_TARGET_HOME
+    assert wizard.goto_calls == [("tests.crud.list", {})]
+
+
+@pytest.mark.asyncio
+async def test_crud_delete_scene_missing_item_without_stored_id_redirects_cleanly(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    monkeypatch.setattr(packs_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoCrudDeleteScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._on_callback_enter(call)
+
+    assert wizard.goto_calls == [("tests.crud.list", {})]
     assert call.answer_calls[-1] == scene.missing_item_notice

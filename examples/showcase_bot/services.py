@@ -98,12 +98,13 @@ class AudienceBroadcastAdapter:
         return [1001, 1002, 1003, 1004]
 
     async def send(self, scene, recipient_id: int, content: str) -> None:
-        logger = await scene.services.require("audit_logger")
-        await logger(f"broadcast.send recipient={recipient_id} content={content!r}")
+        await scene.services.call(
+            "audit_logger",
+            f"broadcast.send recipient={recipient_id} content={content!r}",
+        )
 
     async def on_complete(self, scene, report: BroadcastReport) -> None:
-        collector = await scene.services.require("broadcast_report_collector")
-        await collector(report)
+        await scene.services.call("broadcast_report_collector", report)
 
 
 async def audit_logger(message: str) -> None:

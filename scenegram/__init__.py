@@ -1,5 +1,5 @@
 from .background import BroadcastResult, BroadcastScene, broadcast_module
-from .base import AppScene, SceneDataProxy, SceneNavigator, SceneServicesProxy
+from .base import BACK_TARGET_HOME, AppScene, SceneDataProxy, SceneNavigator, SceneServicesProxy
 from .bootstrap import (
     EntryPoint,
     SceneBootstrapResult,
@@ -54,6 +54,7 @@ from .ui.pagination import PageWindow, PaginatedScene, pager_rows, paginate
 
 __all__ = [
     "AppScene",
+    "BACK_TARGET_HOME",
     "BroadcastAdapter",
     "BroadcastReport",
     "BroadcastResult",

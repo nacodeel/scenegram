@@ -7,6 +7,7 @@ from aiogram.enums import MessageEntityType
 
 import scenegram.base as base_module
 from scenegram import (
+    BACK_TARGET_HOME,
     AppScene,
     Button,
     ConfirmAction,
@@ -327,6 +328,31 @@ async def test_navigator_role_home_uses_role_specific_target(wizard) -> None:
     await scene.nav.role_home(SceneRole.ADMIN)
 
     assert wizard.goto_calls == [("tests.confirm", {})]
+
+
+@pytest.mark.asyncio
+async def test_navigator_back_uses_back_target_override(wizard) -> None:
+    scene = DemoScene(wizard)
+    wizard.data = {"_back_target": "tests.confirm"}
+
+    await scene.nav.back()
+
+    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert "_back_target" not in wizard.data
+    assert wizard.back_calls == []
+
+
+@pytest.mark.asyncio
+async def test_navigator_back_can_route_home_via_back_target_override(wizard) -> None:
+    scene = DemoScene(wizard)
+    scene.home_scene = "tests.demo"
+    wizard.data = {"_back_target": BACK_TARGET_HOME}
+
+    await scene.nav.back(step=1)
+
+    assert wizard.goto_calls == [("tests.demo", {"step": 1})]
+    assert "_back_target" not in wizard.data
+    assert wizard.back_calls == []
 
 
 @pytest.mark.asyncio

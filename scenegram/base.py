@@ -27,6 +27,7 @@ from .runtime import RUNTIME
 from .ui.callbacks import Navigate
 
 ModelT = TypeVar("ModelT")
+BACK_TARGET_HOME = "__scenegram_home__"
 
 
 class SceneDataProxy:
@@ -132,6 +133,13 @@ class SceneNavigator:
         await self.scene.wizard.goto(target, **kwargs)
 
     async def back(self, **kwargs: Any) -> None:
+        target = await self.scene.data.pop("_back_target", default=None)
+        if target:
+            if target == BACK_TARGET_HOME:
+                await self.home(**kwargs)
+                return
+            await self.to(str(target), **kwargs)
+            return
         await self.scene.history.pop()
         await self.scene.wizard.back(**kwargs)
 

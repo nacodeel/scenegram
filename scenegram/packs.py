@@ -9,7 +9,7 @@ from aiogram.fsm.scene import on
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.formatting import Bold, as_key_value, as_list, as_marked_list
 
-from .base import AppScene
+from .base import BACK_TARGET_HOME, AppScene
 from .contracts import CrudAdapter, CrudListItem, CrudPage, MenuContribution, SceneModule
 from .patterns import ConfirmScene
 from .ui import Button, inline_menu
@@ -150,7 +150,10 @@ class CrudDetailScene(AppScene):
 
     async def remember_item_id(self, item_id: str | None = None) -> str:
         if item_id is None:
-            return await self.current_item_id()
+            stored_item_id = await self.data.get("item_id")
+            if stored_item_id is None:
+                raise LookupError("Missing item_id")
+            return str(stored_item_id)
         await self.data.update(item_id=str(item_id))
         return str(item_id)
 
@@ -233,8 +236,8 @@ class CrudDetailScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
-        await self.remember_item_id(item_id)
         try:
+            await self.remember_item_id(item_id)
             await self.render_detail(message)
         except LookupError:
             await self.handle_missing_item(message)
@@ -242,8 +245,8 @@ class CrudDetailScene(AppScene):
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
         await call.answer()
-        await self.remember_item_id(item_id)
         try:
+            await self.remember_item_id(item_id)
             await self.render_detail(call)
         except LookupError:
             await self.handle_missing_item(call)
@@ -290,7 +293,10 @@ class CrudDeleteScene(ConfirmScene):
 
     async def remember_item_id(self, item_id: str | None = None) -> str:
         if item_id is None:
-            return await self.current_item_id()
+            stored_item_id = await self.data.get("item_id")
+            if stored_item_id is None:
+                raise LookupError("Missing item_id")
+            return str(stored_item_id)
         await self.data.update(item_id=str(item_id))
         return str(item_id)
 
@@ -344,6 +350,7 @@ class CrudDeleteScene(ConfirmScene):
         await event.answer(self.success_notice)
         await self.after_delete(event, item)
         if self.list_scene:
+            await self.data.update(_back_target=BACK_TARGET_HOME)
             await self.nav.to(self.list_scene)
             return
         await self.nav.exit()
@@ -353,16 +360,16 @@ class CrudDeleteScene(ConfirmScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
-        await self.remember_item_id(item_id)
         try:
+            await self.remember_item_id(item_id)
             await super()._on_message_enter(message)
         except LookupError:
             await self.handle_missing_item(message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
-        await self.remember_item_id(item_id)
         try:
+            await self.remember_item_id(item_id)
             await super()._on_callback_enter(call)
         except LookupError:
             await self.handle_missing_item(call)
