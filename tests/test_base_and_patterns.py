@@ -223,6 +223,38 @@ async def test_scene_prefers_module_services_and_falls_back_to_container(wizard)
 
 
 @pytest.mark.asyncio
+async def test_services_call_supports_direct_callable_service_bindings(wizard) -> None:
+    calls: list[str] = []
+
+    async def audit_logger(message: str) -> None:
+        calls.append(message)
+
+    RUNTIME.reset()
+    RUNTIME.service_container = MappingContainer({"audit_logger": audit_logger})
+    scene = DemoScene(wizard)
+
+    await scene.services.call("audit_logger", "hello")
+
+    assert calls == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_services_call_supports_provider_returning_callable(wizard) -> None:
+    calls: list[str] = []
+
+    async def audit_logger(message: str) -> None:
+        calls.append(message)
+
+    RUNTIME.reset()
+    RUNTIME.service_container = MappingContainer({"audit_logger": lambda: audit_logger})
+    scene = DemoScene(wizard)
+
+    await scene.services.call("audit_logger", "hello")
+
+    assert calls == ["hello"]
+
+
+@pytest.mark.asyncio
 async def test_confirm_scene_default_rows_are_built(wizard) -> None:
     scene = DemoConfirmScene(wizard)
     rows = await scene.confirm_rows(SimpleNamespace())

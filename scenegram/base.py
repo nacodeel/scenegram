@@ -114,8 +114,14 @@ class SceneServicesProxy:
         return await self.scene.require_service(key)
 
     async def call(self, key: str, *args: Any) -> Any:
-        callback = await self.require(key)
-        return await call_with_optional_args(callback, *args)
+        binding = self.scene.service_binding(key)
+        if callable(binding):
+            result = await call_with_optional_args(binding, *args)
+            if callable(result):
+                return await call_with_optional_args(result, *args)
+            return result
+
+        raise TypeError(f"Service '{key}' is not callable")
 
 
 class SceneNavigator:
@@ -255,16 +261,7 @@ class AppScene(Scene, reset_history_on_enter=False):
 
     async def resolve_service(self, key: str, default: Any = UNSET) -> Any:
         module = self.module
-
-        if module and key in module.services:
-            return await resolve_service_value(module.services[key], scene=self, module=module)
-
-        value = self.runtime.service_container.resolve(
-            key,
-            scene=self,
-            module=module,
-            default=default,
-        )
+        value = self.service_binding(key, default=default)
         if value is UNSET:
             raise MissingServiceError(key)
         if value is default:
@@ -273,6 +270,19 @@ class AppScene(Scene, reset_history_on_enter=False):
 
     async def require_service(self, key: str) -> Any:
         return await self.resolve_service(key)
+
+    def service_binding(self, key: str, default: Any = UNSET) -> Any:
+        module = self.module
+
+        if module and key in module.services:
+            return module.services[key]
+
+        return self.runtime.service_container.resolve(
+            key,
+            scene=self,
+            module=module,
+            default=default,
+        )
 
     async def show(
         self,
