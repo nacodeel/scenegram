@@ -82,6 +82,7 @@ def scene_middleware(
 
 ModuleSetup = Callable[["SceneModule"], Any]
 ModuleCallback = Callable[..., Awaitable[Any] | Any]
+SceneObserver = Callable[["SceneObserverEvent"], Awaitable[Any] | Any]
 
 
 @dataclass(slots=True, frozen=True)
@@ -140,6 +141,15 @@ class SceneModule:
             metadata=self.metadata,
             setup=self.setup,
         )
+
+
+@dataclass(slots=True, frozen=True)
+class SceneObserverEvent:
+    name: str
+    state: str | None = None
+    target_state: str | None = None
+    update_type: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)

@@ -9,12 +9,14 @@ from typing import Any
 
 from aiogram import Router
 from aiogram.filters import Command, Filter
+from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.scene import SceneRegistry
 
-from .contracts import SceneCleanup, SceneMiddleware, SceneModule
+from .contracts import SceneCleanup, SceneMiddleware, SceneModule, scene_middleware
 from .di import adapt_container
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import DEFAULT_CLEANUP, RUNTIME, RoleResolver
+from .security import SecureScenesManagerProxy
 
 
 @dataclass(slots=True)
@@ -44,6 +46,27 @@ class SceneBootstrapResult:
     descriptors: list[SceneDescriptor]
     scene_map: dict[str, type]
     modules: dict[str, SceneModule]
+
+
+class SecureScenesMiddleware:
+    async def __call__(self, handler: Any, event: Any, data: dict[str, Any]) -> Any:
+        manager = data.get("scenes")
+        if manager is not None and not isinstance(manager, SecureScenesManagerProxy):
+            data["scenes"] = SecureScenesManagerProxy(manager)
+        return await handler(event, data)
+
+
+class SceneErrorMiddleware:
+    async def __call__(self, handler: Any, event: Any, data: dict[str, Any]) -> Any:
+        try:
+            return await handler(event, data)
+        except Exception as exc:
+            await RUNTIME.emit(
+                "scene.unhandled_error",
+                event=event,
+                error=repr(exc),
+            )
+            raise
 
 
 class RoleAllowed(Filter):
@@ -176,6 +199,53 @@ def _discover_modules(package_name: str) -> list[str]:
     return module_names
 
 
+def discover_callback_prefixes(
+    package_name: str | Sequence[str],
+    *,
+    extra_modules: Sequence[str] | None = None,
+) -> dict[str, str]:
+    discovered: dict[str, str] = {}
+
+    module_names: list[str] = []
+    for root_package in _normalize_packages(package_name):
+        module_names.extend(_discover_modules(root_package))
+    module_names.extend(extra_modules or ())
+
+    for module_name in module_names:
+        module = importlib.import_module(module_name)
+        for _, candidate in inspect.getmembers(module, inspect.isclass):
+            if candidate is CallbackData:
+                continue
+            if not issubclass(candidate, CallbackData):
+                continue
+            if candidate.__module__ != module.__name__:
+                continue
+            prefix = getattr(candidate, "__prefix__", None)
+            if not isinstance(prefix, str) or not prefix:
+                continue
+            owner = f"{candidate.__module__}.{candidate.__name__}"
+            existing = discovered.get(prefix)
+            if existing is not None and existing != owner:
+                raise RuntimeError(
+                    f"Callback prefix collision for '{prefix}': {existing} vs {owner}"
+                )
+            discovered[prefix] = owner
+
+    return discovered
+
+
+def _reserved_callback_prefixes() -> dict[str, str]:
+    from .packs import CrudAction
+    from .patterns import ConfirmAction, FormAction, StepAction
+    from .ui.callbacks import Navigate, PageNav
+
+    callback_types = (Navigate, PageNav, ConfirmAction, StepAction, FormAction, CrudAction)
+    return {
+        callback_type.__prefix__: f"{callback_type.__module__}.{callback_type.__name__}"
+        for callback_type in callback_types
+    }
+
+
 def discover_scene_modules(
     package_name: str | Sequence[str],
     *,
@@ -300,6 +370,13 @@ def create_scenes_router(
     RUNTIME.service_container = adapt_container(service_container)
     RUNTIME.cleanup = cleanup or DEFAULT_CLEANUP
     RUNTIME.register_modules(discovered_modules.values())
+    RUNTIME.register_descriptors(descriptors)
+    RUNTIME.register_callback_prefixes(
+        {
+            **_reserved_callback_prefixes(),
+            **discover_callback_prefixes(package_name),
+        }
+    )
 
     grouped_routers: dict[tuple[str, ...], Router] = {}
     global_middlewares = tuple(middlewares or ())
@@ -332,6 +409,8 @@ def create_scenes_router(
         _apply_middlewares(
             scene_router,
             (
+                scene_middleware(SecureScenesMiddleware(), "message", "callback_query"),
+                scene_middleware(SceneErrorMiddleware(), "message", "callback_query"),
                 *global_middlewares,
                 *(module.middlewares if module is not None else ()),
                 *tuple(getattr(scene_cls, "middlewares", ())),

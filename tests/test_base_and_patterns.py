@@ -32,6 +32,11 @@ class DemoScene(AppScene, state="tests.demo"):
     __abstract__ = False
 
 
+class LockedScene(AppScene, state="tests.locked"):
+    __abstract__ = False
+    roles = frozenset({SceneRole.ADMIN.value})
+
+
 class DemoMenuScene(MenuScene, state="tests.menu"):
     __abstract__ = False
     menu_text = "Menu"
@@ -590,6 +595,57 @@ async def test_resolve_roles_returns_default_user_role_when_resolver_missing(wiz
     RUNTIME.role_resolver = None
 
     assert await scene.resolve_roles(SimpleNamespace()) == {SceneRole.USER.value}
+
+
+@pytest.mark.asyncio
+async def test_navigator_blocks_transition_to_forbidden_scene(wizard) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    scene = DemoScene(wizard)
+    wizard.manager.event = FakeCallbackQuery()
+    RUNTIME.roles_by_state["tests.locked"] = frozenset({SceneRole.ADMIN.value})
+    RUNTIME.role_resolver = lambda event: {SceneRole.USER.value}
+
+    await scene.nav.to("tests.locked")
+
+    assert wizard.goto_calls == []
+    assert wizard.data.get("_scene_stack") is None
+    assert wizard.manager.event.answer_calls == [scene.access_denied_text]
+
+
+@pytest.mark.asyncio
+async def test_secure_manager_redirects_denied_enter_to_default_home(wizard) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    scene = DemoScene(wizard)
+    wizard.manager.event = FakeCallbackQuery()
+    RUNTIME.roles_by_state["tests.locked"] = frozenset({SceneRole.ADMIN.value})
+    RUNTIME.roles_by_state["tests.menu"] = frozenset({SceneRole.ANY.value})
+    RUNTIME.default_home = "tests.menu"
+    RUNTIME.role_resolver = lambda event: {SceneRole.USER.value}
+
+    await wizard.manager.enter("tests.locked", _check_active=False)
+
+    assert wizard.manager.enter_calls == [("tests.menu", False, {})]
+    assert wizard.manager.event.answer_calls == [scene.access_denied_text]
+
+
+@pytest.mark.asyncio
+async def test_runtime_observer_receives_render_and_transition_events(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    events = []
+    RUNTIME.observe(lambda event: events.append(event))
+    scene = DemoScene(wizard)
+    message = FakeMessage()
+
+    await scene.show(message, "Hello")
+    await scene.nav.to("tests.confirm")
+
+    names = [event.name for event in events]
+
+    assert "scene.render" in names
+    assert "scene.transition" in names
 
 
 def test_step_scene_declared_steps_are_sorted_numerically() -> None:

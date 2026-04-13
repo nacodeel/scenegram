@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import inspect
+import logging
 from collections.abc import Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import fields, is_dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from aiogram import F
 from aiogram.exceptions import TelegramBadRequest
@@ -24,17 +24,72 @@ from .formatting import RenderableText, render_text
 from .history import SceneHistoryProxy, SceneStackProxy
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import RUNTIME
+from .security import (
+    ACCESS_DENIED_TEXT,
+    SecureScenesManagerProxy,
+    is_state_allowed,
+    notify_access_denied,
+    resolve_event_roles,
+    resolve_target_state,
+)
 from .ui.callbacks import Navigate
 from .ui.keyboards import uses_message_reply_markup
 
 ModelT = TypeVar("ModelT")
 BACK_TARGET_HOME = "__scenegram_home__"
 HIDDEN_REPLY_TEXT = "\u2060"
+LOGGER = logging.getLogger("scenegram")
+FRAMEWORK_DATA_KEYS = frozenset(
+    {
+        "_back_target",
+        "_history",
+        "_scene_stack",
+        "_screen_message_id",
+    }
+)
+
+
+class _SceneDataMutation(dict[str, Any]):
+    def __init__(self, data: Mapping[str, Any], *, protected_keys: set[str]) -> None:
+        super().__init__(data)
+        self._protected_keys = protected_keys
+
+    def _ensure_mutable(self, key: str) -> None:
+        if key in self._protected_keys:
+            raise KeyError(f"Protected scene data key cannot be mutated: {key}")
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._ensure_mutable(key)
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        self._ensure_mutable(key)
+        super().__delitem__(key)
+
+    def pop(self, key: str, default: Any | None = None) -> Any:
+        self._ensure_mutable(key)
+        return super().pop(key, default)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        candidate = dict(*args, **kwargs)
+        for key in candidate:
+            self._ensure_mutable(key)
+        super().update(candidate)
+
+    def clear(self) -> None:
+        protected = self._protected_keys & set(self.keys())
+        if protected:
+            joined = ", ".join(sorted(protected))
+            raise KeyError(f"Protected scene data keys cannot be cleared: {joined}")
+        super().clear()
 
 
 class SceneDataProxy:
     def __init__(self, wizard: Any) -> None:
         self._wizard = wizard
+
+    def framework_keys(self) -> frozenset[str]:
+        return FRAMEWORK_DATA_KEYS
 
     async def all(self) -> dict[str, Any]:
         return await self._wizard.get_data()
@@ -79,25 +134,39 @@ class SceneDataProxy:
     async def clear(self) -> None:
         await self._wizard.clear_data()
 
-    async def pop(self, *keys: str, default: Any | None = None) -> Any:
+    @asynccontextmanager
+    async def mutate(
+        self,
+        *,
+        protect_reserved: bool = False,
+        protected_keys: Iterable[str] | None = None,
+    ):
         current = await self.all()
-        values = tuple(current.pop(key, default) for key in keys)
-        await self._wizard.set_data(current)
+        keys = set(protected_keys or ())
+        if protect_reserved:
+            keys.update(self.framework_keys())
+        data = _SceneDataMutation(current, protected_keys=keys)
+        yield data
+        await self._wizard.set_data(dict(data))
+
+    async def pop(self, *keys: str, default: Any | None = None) -> Any:
+        async with self.mutate() as current:
+            values = tuple(current.pop(key, default) for key in keys)
         if len(values) == 1:
             return values[0]
         return values
 
     async def discard(self, *keys: str) -> None:
-        current = await self.all()
-        for key in keys:
-            current.pop(key, None)
-        await self._wizard.set_data(current)
+        async with self.mutate() as current:
+            for key in keys:
+                current.pop(key, None)
 
     async def model(self, model_cls: type[ModelT]) -> ModelT:
         data = await self.all()
 
-        if hasattr(model_cls, "model_validate"):
-            return model_cls.model_validate(data)
+        validator = getattr(model_cls, "model_validate", None)
+        if callable(validator):
+            return cast(ModelT, validator(data))
 
         if is_dataclass(model_cls):
             allowed = {field.name for field in fields(model_cls)}
@@ -132,22 +201,27 @@ class SceneNavigator:
         self.scene = scene
 
     def _target_state(self, target: type[Scene] | str) -> str | None:
-        if isinstance(target, str):
-            return target
-        scene_config = getattr(target, "__scene_config__", None)
-        state = getattr(scene_config, "state", None)
-        if state is None:
-            return None
-        return str(state)
+        return resolve_target_state(target)
 
     async def to(self, target: type[Scene] | str, **kwargs: Any) -> None:
         target_state = self._target_state(target)
+        if not await self.scene.ensure_scene_access(target_state):
+            return
         if target_state is not None:
             await self.scene.stack.push(target_state)
+        await self.scene.runtime.emit(
+            "scene.transition",
+            scene=self.scene,
+            target_state=target_state,
+            event=self.scene.current_event(),
+            action="to",
+        )
         await self.scene.wizard.goto(target, **kwargs)
 
     async def back_to(self, target: type[Scene] | str, **kwargs: Any) -> None:
         target_state = self._target_state(target)
+        if target_state is not None and not await self.scene.ensure_scene_access(target_state):
+            return
         if target_state is None:
             await self.replace(target, sync_stack=False, **kwargs)
             return
@@ -160,6 +234,13 @@ class SceneNavigator:
             else:
                 await self.scene.stack.replace_current(target_state)
         await self.scene.history.pop()
+        await self.scene.runtime.emit(
+            "scene.transition",
+            scene=self.scene,
+            target_state=target_state,
+            event=self.scene.current_event(),
+            action="back_to",
+        )
         await self.replace(target, sync_stack=False, **kwargs)
 
     async def cancel(self, **kwargs: Any) -> None:
@@ -180,6 +261,8 @@ class SceneNavigator:
         manager = getattr(self.scene.wizard, "manager", None)
         history = getattr(manager, "history", None)
         target_state = self._target_state(target)
+        if target_state is not None and not await self.scene.ensure_scene_access(target_state):
+            return
 
         if history is not None and reset_history and hasattr(history, "clear"):
             await history.clear()
@@ -192,6 +275,14 @@ class SceneNavigator:
             else:
                 await self.scene.stack.replace_current(target_state)
 
+        await self.scene.runtime.emit(
+            "scene.transition",
+            scene=self.scene,
+            target_state=target_state,
+            event=self.scene.current_event(),
+            action="replace",
+            reset_history=reset_history,
+        )
         await self.scene.wizard.leave(_with_history=False, **kwargs)
         if manager is None or not hasattr(manager, "enter"):
             await self.scene.wizard.goto(target, **kwargs)
@@ -209,8 +300,19 @@ class SceneNavigator:
 
         target_state = await self.scene.stack.back_target(self.scene.state_id)
         if target_state is not None:
+            if not await self.scene.ensure_scene_access(target_state):
+                await self.scene.stack.pop()
+                await self.scene.history.pop()
+                return await self.back(**kwargs)
             await self.scene.stack.pop()
             await self.scene.history.pop()
+            await self.scene.runtime.emit(
+                "scene.transition",
+                scene=self.scene,
+                target_state=target_state,
+                event=self.scene.current_event(),
+                action="back",
+            )
             await self.replace(target_state, sync_stack=False, **kwargs)
             return
 
@@ -223,6 +325,13 @@ class SceneNavigator:
     async def exit(self, **kwargs: Any) -> None:
         await self.scene.stack.pop()
         await self.scene.history.pop()
+        await self.scene.runtime.emit(
+            "scene.transition",
+            scene=self.scene,
+            target_state=None,
+            event=self.scene.current_event(),
+            action="exit",
+        )
         await self.scene.wizard.exit(**kwargs)
 
     async def home(self, **kwargs: Any) -> None:
@@ -300,9 +409,16 @@ class AppScene(Scene, reset_history_on_enter=False):
     chat_actions: Mapping[str, str | SceneActionConfig] = {}
     cancel_notice_text = "Отменено"
     home_notice_text = "Открываю меню"
+    access_denied_text = ACCESS_DENIED_TEXT
 
     def __init__(self, wizard: Any) -> None:
         super().__init__(wizard)
+        manager = getattr(wizard, "manager", None)
+        if manager is not None:
+            if isinstance(manager, SecureScenesManagerProxy):
+                manager.scene = self
+            else:
+                wizard.manager = SecureScenesManagerProxy(manager, scene=self)
         self.data = SceneDataProxy(wizard)
         self.services = SceneServicesProxy(self)
         self.history = SceneHistoryProxy(self.data)
@@ -323,6 +439,37 @@ class AppScene(Scene, reset_history_on_enter=False):
     @property
     def runtime(self):
         return RUNTIME
+
+    def current_event(self) -> Any | None:
+        manager = getattr(self.wizard, "manager", None)
+        return getattr(manager, "event", None)
+
+    async def current_roles(self, event: Any | None = None) -> set[str]:
+        return await resolve_event_roles(event or self.current_event())
+
+    async def can_access_state(self, target_state: str | None, event: Any | None = None) -> bool:
+        roles = await self.current_roles(event)
+        return is_state_allowed(target_state, roles)
+
+    async def ensure_scene_access(self, target_state: str | None, event: Any | None = None) -> bool:
+        if target_state is None:
+            return True
+
+        current_event = event or self.current_event()
+        roles = await self.current_roles(current_event)
+        if is_state_allowed(target_state, roles):
+            return True
+
+        await self.runtime.emit(
+            "scene.access_denied",
+            scene=self,
+            target_state=target_state,
+            event=current_event,
+            roles=sorted(roles),
+        )
+        if current_event is not None:
+            await notify_access_denied(current_event, self.access_denied_text)
+        return False
 
     def cleanup_policy(self) -> SceneCleanup:
         return self.runtime.merge_cleanup(self.cleanup)
@@ -386,8 +533,31 @@ class AppScene(Scene, reset_history_on_enter=False):
         action: str | SceneActionConfig | None = None,
     ) -> Any:
         config = self.action_config_for(operation=operation, override=action)
-        async with self.chat_action(event, config):
-            return await call_with_optional_args(callback, *args)
+        await self.runtime.emit(
+            "scene.operation.start",
+            scene=self,
+            event=event,
+            operation=operation,
+        )
+        try:
+            async with self.chat_action(event, config):
+                result = await call_with_optional_args(callback, *args)
+        except Exception as exc:
+            await self.runtime.emit(
+                "scene.operation.error",
+                scene=self,
+                event=event,
+                operation=operation,
+                error=repr(exc),
+            )
+            raise
+        await self.runtime.emit(
+            "scene.operation.success",
+            scene=self,
+            event=event,
+            operation=operation,
+        )
+        return result
 
     async def resolve_service(self, key: str, default: Any = UNSET) -> Any:
         module = self.module
@@ -439,6 +609,14 @@ class AppScene(Scene, reset_history_on_enter=False):
                 self.state_id,
                 breadcrumb_label or await self.breadcrumb_label(event, content),
             )
+        await self.runtime.emit(
+            "scene.render",
+            scene=self,
+            event=event,
+            remember=remember,
+            remember_history=remember_history,
+            reply_markup=type(reply_markup).__name__ if reply_markup is not None else None,
+        )
 
         if isinstance(event, CallbackQuery):
             if uses_message_reply_markup(reply_markup):
@@ -446,8 +624,11 @@ class AppScene(Scene, reset_history_on_enter=False):
                     raise RuntimeError(
                         "CallbackQuery without message is not supported by AppScene.show"
                     )
-                await self._cleanup_previous_message(event.message)
-                message = await event.message.answer(**payload)
+                if not hasattr(event.message, "answer"):
+                    raise RuntimeError("CallbackQuery message is not editable/answerable")
+                callback_message = cast(Message, event.message)
+                await self._cleanup_previous_message(callback_message)
+                message = await callback_message.answer(**payload)
                 return await self._remember_screen(message, remember=remember)
             return await self._show_callback(event, payload, remember=remember)
 
@@ -468,9 +649,10 @@ class AppScene(Scene, reset_history_on_enter=False):
 
     async def cleanup_screen(self, message: Message) -> None:
         previous_message_id = await self.data.get("_screen_message_id")
-        if previous_message_id and getattr(message, "bot", None):
+        bot = getattr(message, "bot", None)
+        if previous_message_id and bot is not None:
             try:
-                await message.bot.delete_message(message.chat.id, previous_message_id)
+                await bot.delete_message(message.chat.id, previous_message_id)
             except TelegramBadRequest:
                 pass
 
@@ -481,8 +663,11 @@ class AppScene(Scene, reset_history_on_enter=False):
             return
         if getattr(message, "message_id", None) is None:
             return
+        bot = getattr(message, "bot", None)
+        if bot is None:
+            return
         try:
-            await message.bot.delete_message(message.chat.id, message.message_id)
+            await bot.delete_message(message.chat.id, message.message_id)
         except TelegramBadRequest:
             pass
 
@@ -506,28 +691,18 @@ class AppScene(Scene, reset_history_on_enter=False):
 
         sent = await message.answer(**payload)
 
-        if transient and getattr(message, "bot", None) is not None:
+        bot = getattr(message, "bot", None)
+        if transient and bot is not None:
             sent_message_id = getattr(sent, "message_id", None)
             if sent_message_id is not None:
                 try:
-                    await message.bot.delete_message(message.chat.id, sent_message_id)
+                    await bot.delete_message(message.chat.id, sent_message_id)
                 except TelegramBadRequest:
                     pass
         return sent
 
     async def resolve_roles(self, event: Any) -> set[str]:
-        if RUNTIME.role_resolver is None:
-            return {SceneRole.USER.value}
-
-        resolved = RUNTIME.role_resolver(event)
-        if inspect.isawaitable(resolved):
-            resolved = await resolved
-
-        if resolved is None:
-            return set()
-        if isinstance(resolved, str):
-            return {normalize_role(resolved)}
-        return {normalize_role(role) for role in resolved}
+        return await resolve_event_roles(event)
 
     async def has_any_role(self, event: Any, roles: Iterable[SceneRole | str]) -> bool:
         allowed = normalize_roles(roles)
@@ -621,14 +796,22 @@ class AppScene(Scene, reset_history_on_enter=False):
     ) -> Any:
         if call.message is None:
             raise RuntimeError("CallbackQuery without message is not supported by AppScene.show")
+        if not hasattr(call.message, "edit_text"):
+            raise RuntimeError("CallbackQuery message is not editable")
+        callback_message = cast(Message, call.message)
 
         try:
-            message = await call.message.edit_text(**payload)
+            message = await callback_message.edit_text(**payload)
         except TelegramBadRequest as exc:
             if "message is not modified" in str(exc).lower():
-                message = call.message
+                message = callback_message
                 return await self._remember_screen(message, remember=remember)
-            message = await call.message.answer(**payload)
+            LOGGER.warning(
+                "Callback render failed for state %s: %s",
+                self.state_id,
+                exc,
+            )
+            message = await callback_message.answer(**payload)
 
         return await self._remember_screen(message, remember=remember)
 
@@ -636,9 +819,10 @@ class AppScene(Scene, reset_history_on_enter=False):
         if self.cleanup_policy().delete_previous_screen is not True:
             return
         previous_message_id = await self.data.get("_screen_message_id")
-        if previous_message_id and getattr(message, "bot", None):
+        bot = getattr(message, "bot", None)
+        if previous_message_id and bot is not None:
             try:
-                await message.bot.delete_message(message.chat.id, previous_message_id)
+                await bot.delete_message(message.chat.id, previous_message_id)
             except TelegramBadRequest:
                 pass
 

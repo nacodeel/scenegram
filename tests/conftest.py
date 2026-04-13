@@ -30,6 +30,7 @@ class ManagerStub:
     def __init__(self) -> None:
         self.history = HistoryManagerStub()
         self.enter_calls: list[tuple[Any, bool, dict[str, Any]]] = []
+        self.event: Any | None = None
 
     async def enter(self, scene: Any, _check_active: bool = True, **kwargs: Any) -> None:
         self.enter_calls.append((scene, _check_active, kwargs))
@@ -45,6 +46,8 @@ class WizardStub:
         self.retake_calls: list[dict[str, Any]] = []
         self.exit_calls: list[dict[str, Any]] = []
         self.leave_calls: list[tuple[bool, dict[str, Any]]] = []
+        self.set_data_calls: list[dict[str, Any]] = []
+        self.update_data_calls: list[dict[str, Any]] = []
 
     async def goto(self, target: Any, **kwargs: Any) -> None:
         self.goto_calls.append((target, kwargs))
@@ -74,10 +77,12 @@ class WizardStub:
     ) -> dict[str, Any]:
         payload = dict(data or {})
         payload.update(kwargs)
+        self.update_data_calls.append(dict(payload))
         self.data.update(payload)
         return dict(self.data)
 
     async def set_data(self, data: dict[str, Any]) -> None:
+        self.set_data_calls.append(dict(data))
         self.data = dict(data)
 
     async def clear_data(self) -> None:

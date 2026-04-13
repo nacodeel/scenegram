@@ -9,6 +9,7 @@ from scenegram.bootstrap import (
     RoleAllowed,
     command_entry,
     create_scenes_router,
+    discover_callback_prefixes,
     discover_scene_classes,
     discover_scene_descriptors,
     discover_scene_modules,
@@ -52,6 +53,9 @@ def test_create_scenes_router_returns_scene_map() -> None:
     assert result.scenes == list(result.scene_map.values())
     assert sorted(result.modules) == ["fixtures.sample"]
     assert result.modules["fixtures.sample"].metadata["kind"] == "fixtures"
+    assert result.scene_map["admin.dashboard"].__name__ == "AdminScene"
+    assert result.scene_map["common.home"].__name__ == "HomeScene"
+    assert RUNTIME.roles_by_state["admin.dashboard"] == frozenset({SceneRole.ADMIN.value})
 
 
 def test_create_scenes_router_accepts_multiple_packages() -> None:
@@ -88,6 +92,18 @@ def test_discover_scene_modules_reads_scenegram_module_manifest() -> None:
     assert modules["fixtures.sample"].package_name == "tests.fixtures.sample_scenes"
 
 
+def test_discover_callback_prefixes_reads_callback_data_classes() -> None:
+    prefixes = discover_callback_prefixes("scenegram.ui.callbacks")
+
+    assert prefixes["nav"] == "scenegram.ui.callbacks.Navigate"
+    assert prefixes["page"] == "scenegram.ui.callbacks.PageNav"
+
+
+def test_discover_callback_prefixes_fails_on_collision() -> None:
+    with pytest.raises(RuntimeError, match="Callback prefix collision"):
+        discover_callback_prefixes("tests.fixtures.callback_collision")
+
+
 def test_create_scenes_router_applies_global_module_and_scene_middlewares() -> None:
     result = create_scenes_router(
         package_name="tests.fixtures.sample_scenes",
@@ -105,7 +121,11 @@ def test_create_scenes_router_applies_global_module_and_scene_middlewares() -> N
     scene_router = next(
         router for router in result.router.sub_routers if router.name == "scene:common.home"
     )
-    tags = [middleware.tag for middleware in scene_router.message.outer_middleware._middlewares]
+    tags = [
+        middleware.tag
+        for middleware in scene_router.message.outer_middleware._middlewares
+        if hasattr(middleware, "tag")
+    ]
 
     assert tags == [
         "global:HomeScene:fixtures.sample",

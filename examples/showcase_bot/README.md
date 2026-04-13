@@ -27,7 +27,8 @@ showcase_bot/
 - включает `SimpleEventIsolation`;
 - подключает `create_scenes_router(...)`;
 - пробрасывает глобальный `service_container`;
-- задаёт глобальную cleanup policy.
+- задаёт глобальную cleanup policy;
+- получает secure internal transitions и callback prefix validation автоматически.
 
 ### `services.py`
 
@@ -81,6 +82,7 @@ showcase_bot/
 - полагаться на `aiogram.utils.formatting`, а не на HTML-строки;
 - использовать auto reply-keyboards на `StepScene` / `FormScene` и удалять их через built-in cancel flow;
 - включать `step_pagination = True` только там, где форма должна разрешать question-level navigation;
+- использовать `state_model(...)` для typed draft state там, где данные живут дольше одного экрана;
 - задавать cleanup/chat action policies декларативно на уровне сцены.
 
 ## Запуск

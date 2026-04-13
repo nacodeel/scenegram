@@ -1,6 +1,6 @@
 [project]
 name = "scenegram"
-version = "0.3.0"
+version = "0.4.0"
 description = "Opinionated framework utilities for production-grade aiogram scenes"
 readme = "README.md"
 authors = [
@@ -25,8 +25,14 @@ classifiers = [
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+scenegram = "scenegram.cli:main"
+
 [dependency-groups]
 dev = [
+    "pydantic>=2.11",
+    "pyright>=1.1",
+    "pre-commit>=4.2",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.11",
@@ -43,6 +49,11 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["scenegram"]
 
 [tool.setuptools.package-data]
 scenegram = ["py.typed"]

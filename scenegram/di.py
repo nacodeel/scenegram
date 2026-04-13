@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from ._utils import call_with_optional_args
 from .contracts import ProviderValue, SceneModule, SupportsResolve
@@ -74,8 +74,8 @@ def adapt_container(value: SupportsResolve | Mapping[str, ProviderValue] | None)
     if value is None:
         return NullContainer()
     if hasattr(value, "resolve"):
-        return value
-    return MappingContainer(value)
+        return cast(SupportsResolve, value)
+    return MappingContainer(cast(Mapping[str, ProviderValue], value))
 
 
 def is_provider_callable(value: ProviderValue) -> bool:

@@ -15,13 +15,13 @@ from .patterns import FormField, FormScene
 from .ui import Button, Navigate, inline_menu
 
 
-async def _iterate_recipients(source: Any) -> list[int]:
+async def _iterate_recipients(source: Any):
     if hasattr(source, "__aiter__"):
-        result: list[int] = []
         async for item in source:
-            result.append(int(item))
-        return result
-    return [int(item) for item in source]
+            yield int(item)
+        return
+    for item in source:
+        yield int(item)
 
 
 @dataclass(slots=True)
@@ -84,51 +84,73 @@ class BroadcastScene(FormScene):
         content: str,
     ) -> None:
         started_at = perf_counter()
-        recipients = await _iterate_recipients(await maybe_await(adapter.iter_recipients(self)))
-        semaphore = asyncio.Semaphore(max(1, self.broadcast_concurrency))
+        recipients = _iterate_recipients(await maybe_await(adapter.iter_recipients(self)))
+        concurrency = max(1, self.broadcast_concurrency)
+        total = 0
         sent = 0
         failed = 0
         errors: list[str] = []
         lock = asyncio.Lock()
+        pending: set[asyncio.Task[Any]] = set()
+        cancelled = False
 
         async def send_one(recipient_id: int) -> None:
             nonlocal sent, failed
-            async with semaphore:
-                try:
-                    await asyncio.wait_for(
-                        adapter.send(self, recipient_id, content),
-                        timeout=self.broadcast_timeout,
-                    )
-                except Exception as exc:  # pragma: no cover - covered through counters
-                    async with lock:
-                        failed += 1
-                        errors.append(f"{recipient_id}: {exc}")
-                    return
-
+            try:
+                await asyncio.wait_for(
+                    adapter.send(self, recipient_id, content),
+                    timeout=self.broadcast_timeout,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - covered through counters
                 async with lock:
-                    sent += 1
+                    failed += 1
+                    errors.append(f"{recipient_id}: {exc}")
+                return
 
-        tasks: list[asyncio.Task[Any]] = []
+            async with lock:
+                sent += 1
+
+        async def drain_pending(*, force: bool = False) -> None:
+            nonlocal pending
+            while pending and (force or len(pending) >= concurrency):
+                done, pending = await asyncio.wait(
+                    pending,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if done:
+                    await asyncio.gather(*done)
+
         delay = 0.0 if self.broadcast_rate_limit <= 0 else 1 / self.broadcast_rate_limit
-        for recipient_id in recipients:
-            tasks.append(asyncio.create_task(send_one(recipient_id)))
-            if delay:
-                await asyncio.sleep(delay)
-
-        if tasks:
-            await asyncio.gather(*tasks)
-
-        report = BroadcastReport(
-            job_id=task_id,
-            total=len(recipients),
-            sent=sent,
-            failed=failed,
-            duration_seconds=round(perf_counter() - started_at, 4),
-            errors=tuple(errors),
-            metadata={"scene": self.state_id},
-        )
-        await maybe_await(adapter.on_complete(self, report))
-        await maybe_await(self.on_broadcast_complete(report))
+        try:
+            async for recipient_id in recipients:
+                total += 1
+                pending.add(asyncio.create_task(send_one(recipient_id)))
+                await drain_pending()
+                if delay:
+                    await asyncio.sleep(delay)
+            await drain_pending(force=True)
+        except asyncio.CancelledError:
+            cancelled = True
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        finally:
+            report = BroadcastReport(
+                job_id=task_id,
+                total=total,
+                sent=sent,
+                failed=failed,
+                duration_seconds=round(perf_counter() - started_at, 4),
+                errors=tuple(errors),
+                metadata={"scene": self.state_id, "cancelled": cancelled},
+            )
+            await maybe_await(adapter.on_complete(self, report))
+            await maybe_await(self.on_broadcast_complete(report))
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def on_broadcast_complete(self, report: BroadcastReport) -> None:
         return None

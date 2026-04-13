@@ -7,6 +7,7 @@ from .bootstrap import (
     callback_entry,
     command_entry,
     create_scenes_router,
+    discover_callback_prefixes,
     discover_scene_classes,
     discover_scene_descriptors,
     discover_scene_modules,
@@ -25,6 +26,7 @@ from .contracts import (
     SceneCleanup,
     SceneMiddleware,
     SceneModule,
+    SceneObserverEvent,
     scene_middleware,
 )
 from .di import (
@@ -35,6 +37,7 @@ from .di import (
     adapt_container,
 )
 from .history import SceneHistoryProxy
+from .namespaces import CallbackNamespace, cb_namespace
 from .packs import CrudAction, CrudDeleteScene, CrudDetailScene, CrudListScene, crud_module
 from .patterns import (
     ConfirmAction,
@@ -49,6 +52,7 @@ from .patterns import (
 )
 from .roles import SceneRole
 from .runtime import DEFAULT_CLEANUP, RUNTIME, SceneRuntime
+from .state import BoundStateModel, StateModelDescriptor, state_model
 from .tasks import SceneTaskRunner, TaskHandle
 from .ui.callbacks import Navigate, PageNav
 from .ui.keyboards import (
@@ -72,6 +76,8 @@ __all__ = [
     "BroadcastScene",
     "BreadcrumbItem",
     "Button",
+    "BoundStateModel",
+    "CallbackNamespace",
     "CompositeContainer",
     "ConfirmAction",
     "ConfirmScene",
@@ -108,19 +114,23 @@ __all__ = [
     "SceneMiddleware",
     "SceneModule",
     "SceneNavigator",
+    "SceneObserverEvent",
     "SceneRole",
     "SceneRuntime",
     "SceneServicesProxy",
     "SceneTaskRunner",
     "StepAction",
     "StepScene",
+    "StateModelDescriptor",
     "TaskHandle",
     "adapt_container",
     "broadcast_module",
+    "cb_namespace",
     "callback_entry",
     "command_entry",
     "create_scenes_router",
     "crud_module",
+    "discover_callback_prefixes",
     "discover_scene_classes",
     "discover_scene_descriptors",
     "discover_scene_modules",
@@ -133,6 +143,7 @@ __all__ = [
     "reply_menu",
     "reply_nav_row",
     "scene_middleware",
+    "state_model",
     "step_nav_row",
     "uses_message_reply_markup",
 ]

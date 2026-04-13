@@ -6,10 +6,14 @@
 
 - `base.py` — `AppScene`, data/services/history/navigation proxies, render pipeline, cleanup, chat actions.
 - `bootstrap.py` — discovery, descriptors, role-aware router assembly, scene registry bootstrap.
+- `cli.py` — CLI для `check` и генерации шаблонов сцен/модулей.
 - `contracts.py` — typed contracts для scene modules, middleware bindings, menu contributions, cleanup, CRUD и broadcast adapters.
 - `di.py` — mapping/composite/null containers и service resolution helpers.
 - `runtime.py` — shared runtime, cleanup defaults, module registry, menu contribution routing, task runner.
 - `history.py` — breadcrumbs proxy и отдельный screen-stack proxy поверх scene data.
+- `security.py` — role guards и secure scenes manager proxy.
+- `state.py` — typed state accessors поверх scene data.
+- `namespaces.py` — callback namespace helpers.
 - `tasks.py` — in-process background task runner для модульных сцен.
 - `patterns.py` — `MenuScene`, `ConfirmScene`, `StepScene`, `FormScene`.
 - `packs.py` — built-in CRUD scene pack и `crud_module(...)`.
@@ -31,13 +35,17 @@
 - auto-discovery и auto-registration сцен;
 - role-aware routing и home scenes;
 - service container + module-local services;
+- typed state descriptors и mutation contexts поверх raw scene data;
 - cleanup policies и breadcrumbs/history;
 - screen-stack navigation только по главным экранам сцен;
 - global/module/scene middlewares;
+- secure role guards на внутренних `enter/goto` переходах;
+- callback prefix validation и namespaced helpers для portable modules;
+- runtime observer hooks на transitions/render/operations/tasks;
 - declarative chat actions;
 - step/forms с typed result model, auto reply-keyboards и optional step-carousel внутри анкет;
 - portable CRUD and broadcast packs;
-- top-level public API через `scenegram.__init__`.
+- top-level public API и CLI через `scenegram.__init__` / `scenegram` script.
 
 ## Что ещё не реализовано
 
@@ -53,10 +61,12 @@
 - scene packs не зависят от ORM/БД; всё доменное поведение идёт через adapters/services.
 - module manifests завязаны на package prefix, чтобы сцены автоматически связывались со своим модулем.
 - middleware применяются через wrapper-router на сцену, чтобы entrypoints и scene handlers шли через единый pipeline.
+- внутренние переходы дополнительно проверяются на роли через secure manager proxy, а не только через router filters.
 - reply keyboard на form/step сценах остаётся opt-out и удаляется на cancel через `ReplyKeyboardRemove`, а не через неявное поведение клиента.
 - глобальный `back` идёт по собственному scene screen stack, а не по промежуточным step/page/confirm состояниям.
 - `cancel` возвращает к `home_scene` текущей сцены без потери родительского back-stack, а `home`/`/start` выполняют root reset.
 - `FormScene` по умолчанию возвращает `edit` на первый вопрос, а carousel/skip поведение включается декларативно на уровне сцены и отдельного `FormField`.
+- background task runner хранит lifecycle/status в памяти процесса и даёт bounded-concurrency базу для `BroadcastScene`.
 
 ## Правила расширения
 

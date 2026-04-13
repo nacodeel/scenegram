@@ -6,10 +6,11 @@
 
 - auto-discovery и auto-registration сцен без ручного реестра;
 - роли, домашние сцены и модульные menu contributions;
+- безопасные внутренние переходы между сценами с role-guard не только на entrypoints, но и на `goto/enter`;
 - portable scene modules, которые можно переносить между ботами вместе с логикой;
 - встроенные patterns для menu, pagination, confirm, step, forms, CRUD и background broadcast;
 - нативная поддержка `aiogram.utils.formatting` без собственного markup DSL;
-- service container, module-local adapters, cleanup policies, scene-level screen history, middlewares и chat actions.
+- service container, typed state accessors, cleanup policies, scene-level screen history, middlewares, chat actions и runtime hooks.
 
 ## Что теперь умеет framework
 
@@ -49,6 +50,42 @@ await self.services.call("audit_logger", "message")
 
 1. `SceneModule.services`
 2. глобальный `service_container`
+
+### 3.1. Typed scene state
+
+Помимо raw `self.data`, framework теперь поддерживает typed state model через descriptor `state_model(...)`.
+
+```python
+from dataclasses import dataclass
+
+from scenegram import AppScene, state_model
+
+
+@dataclass(slots=True)
+class ProfileDraft:
+    name: str | None = None
+    email: str | None = None
+
+
+class ProfileScene(AppScene, state="profile.edit"):
+    __abstract__ = False
+    draft = state_model(ProfileDraft, key="_draft", default_factory=ProfileDraft)
+
+    async def save_name(self, message):
+        await self.draft.patch(name=message.text)
+```
+
+Для low-level сценариев `SceneDataProxy` теперь даёт `async with self.data.mutate(): ...`, чтобы собрать несколько изменений в один `set_data(...)` и при необходимости защитить framework keys.
+
+### 3.2. Secure scene access
+
+Role-фильтры теперь применяются не только на entrypoints, но и на внутренних переходах сцен.
+
+Это означает:
+
+- `Navigate.open("admin.dashboard")` не откроет закрытую сцену пользователю без роли;
+- `self.nav.to(...)`, `self.nav.replace(...)`, `wizard.goto(...)` и `ScenesManager.enter(...)` проходят через guard;
+- при запрете перехода пользователь получает короткий notice, а framework не кладёт forbidden scene в stack.
 
 ### 4. Cleanup policies
 
@@ -136,6 +173,11 @@ create_scenes_router(
     ),
 )
 ```
+
+Встроенно на каждый scene router также ставятся:
+
+- security middleware, который оборачивает `data["scenes"]` в secure manager proxy;
+- error middleware, который эмитит runtime event на необработанные ошибки scene-layer.
 
 ### 6. Reply keyboard на шагах ввода
 
@@ -230,7 +272,41 @@ class HeavyScene(AppScene, state="heavy.run"):
 Framework сам оборачивает `run_operation(...)` в `async with ChatActionSender(...)`, если для операции задан action.
 По официальному aiogram sender крутит action, пока не завершится операция, без ручной длительности на стороне вашей сцены.
 
-### 8. Нативный aiogram formatting
+### 8. Callback namespaces и observability hooks
+
+Для portable modules можно использовать namespaced callback prefixes, чтобы не ловить коллизии между модулями:
+
+```python
+from aiogram.filters.callback_data import CallbackData
+
+from scenegram import cb_namespace
+
+catalog_cb = cb_namespace("catalog.module")
+
+
+class CatalogItemCb(CallbackData, prefix=catalog_cb.callback_prefix("item")):
+    action: str
+    item_id: str
+```
+
+`create_scenes_router(...)` теперь fail-fast валидирует callback prefix collisions на старте.
+
+Runtime также поддерживает observer hooks:
+
+```python
+from scenegram import RUNTIME
+
+
+async def log_scene_events(event):
+    print(event.name, event.state, event.target_state, event.metadata)
+
+
+RUNTIME.observe(log_scene_events)
+```
+
+Framework эмитит события на render, transition, operation start/success/error, unhandled errors и background task lifecycle.
+
+### 9. Нативный aiogram formatting
 
 `scenegram` не подменяет `aiogram.utils.formatting`.
 
@@ -263,10 +339,14 @@ scenegram/
 ├── __init__.py          # top-level API
 ├── base.py              # AppScene, data/services/history/navigation
 ├── bootstrap.py         # discovery, descriptors, router assembly
+├── cli.py               # scenegram CLI (check / generate)
 ├── contracts.py         # typed contracts и module manifests
 ├── di.py                # containers/adapters
 ├── runtime.py           # runtime state и defaults
 ├── history.py           # breadcrumbs/history proxy
+├── security.py          # secure scene access / manager proxy
+├── state.py             # typed state descriptors
+├── namespaces.py        # callback namespace helpers
 ├── tasks.py             # background task runner
 ├── patterns.py          # MenuScene / ConfirmScene / StepScene / FormScene
 ├── packs.py             # CrudListScene / CrudDetailScene / CrudDeleteScene
@@ -280,10 +360,19 @@ scenegram/
 uv add scenegram
 ```
 
+После подключения можно проверить пакет сцен и сгенерировать шаблоны:
+
+```bash
+scenegram check bot.scenes
+scenegram generate scene --state common.start --class-name StartScene
+scenegram generate module --name catalog --package-name bot.scenes.catalog --target-state catalog.list --menu-target common.start
+```
+
 Для разработки этого репозитория:
 
 ```bash
 uv sync --group dev
+pre-commit install
 ```
 
 ## Быстрый старт в своём боте
@@ -514,6 +603,7 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 - `SceneServicesProxy`
 - `SceneHistoryProxy`
 - `SceneNavigator`
+- `state_model(...)`
 - `SceneModule`
 - `SceneMiddleware`
 - `SceneCleanup`
@@ -536,6 +626,7 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 
 - `Button`, `ReplyButton`
 - `Navigate`, `PageNav`
+- `cb_namespace(...)`
 - `inline_menu`, `reply_menu`, `nav_row`, `reply_nav_row`
 - `scene_middleware(...)`
 - `paginate`, `pager_rows`
