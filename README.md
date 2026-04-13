@@ -169,13 +169,14 @@ from scenegram import SceneActionConfig
 
 class HeavyScene(AppScene, state="heavy.run"):
     __abstract__ = False
-    default_chat_action = SceneActionConfig(action="typing", interval=4.0)
+    default_chat_action = SceneActionConfig(action="typing")
     chat_actions = {
-        "generate_report": SceneActionConfig(action="upload_document", interval=4.0),
+        "generate_report": SceneActionConfig(action="upload_document"),
     }
 ```
 
-Framework сам оборачивает `run_operation(...)` в `ChatActionSender`, если для операции задан action.
+Framework сам оборачивает `run_operation(...)` в `async with ChatActionSender(...)`, если для операции задан action.
+По официальному aiogram sender крутит action, пока не завершится операция, без ручной длительности на стороне вашей сцены.
 
 ### 8. Нативный aiogram formatting
 

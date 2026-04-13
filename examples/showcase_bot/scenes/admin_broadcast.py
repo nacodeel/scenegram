@@ -29,7 +29,7 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
     roles = frozenset({SceneRole.ADMIN.value})
     home_scene = "admin.dashboard"
     cleanup = SceneCleanup(delete_previous_screen=True, delete_user_messages=True)
-    default_chat_action = SceneActionConfig(action="typing", interval=4.0)
+    default_chat_action = SceneActionConfig(action="typing")
     confirm_title = Bold("Проверьте текст перед запуском фоновой рассылки")
     fields = (
         FormField(

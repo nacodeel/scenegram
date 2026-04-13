@@ -117,7 +117,10 @@ async def test_form_scene_cancel_text_bypasses_validation_and_navigates_home(wiz
 
     await scene._on_step_input(message)
 
-    assert wizard.goto_calls == [("tests.home", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.home", False, {})]
     assert message.answer_calls == []
     assert message.reply_calls[0]["text"] == "Отменено"
     assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
@@ -135,9 +138,13 @@ async def test_form_scene_start_command_bypasses_validation_and_navigates_home(w
 
     await scene._on_step_input(message)
 
-    assert wizard.goto_calls == [("tests.home", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.home", False, {})]
     assert message.answer_calls == []
-    assert message.reply_calls[0]["text"] == scene.home_notice_text
+    assert message.reply_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
+    assert message.bot.deleted == [(100, message.reply_message_id)]
     assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
     assert "email" not in wizard.data
 

@@ -26,7 +26,7 @@ class SupportsResolve(Protocol):
 @dataclass(slots=True, frozen=True)
 class SceneActionConfig:
     action: str = TelegramChatAction.TYPING
-    interval: float = 4.5
+    interval: float = 5.0
     initial_sleep: float = 0.0
     enabled: bool = True
 

@@ -211,7 +211,10 @@ async def test_cancel_text_replies_with_keyboard_remove_and_navigates_home(wizar
 
     assert message.reply_calls[0]["text"] == "Отменено"
     assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
-    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
 
 
 @pytest.mark.asyncio
@@ -226,7 +229,49 @@ async def test_home_text_replies_with_keyboard_remove_and_navigates_home(wizard)
 
     assert message.reply_calls[0]["text"] == scene.home_notice_text
     assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
-    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
+
+
+@pytest.mark.asyncio
+async def test_navigate_home_callback_resets_history_before_entering_target(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._navigate_home(call, Navigate.home("tests.confirm"))
+
+    assert call.answer_calls == [None]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
+
+
+@pytest.mark.asyncio
+async def test_start_command_removes_keyboard_without_visible_notice(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = DemoScene(wizard)
+    scene.home_scene = "tests.confirm"
+    message = FakeMessage(text="/start")
+
+    await scene._start_command(message)
+
+    assert message.reply_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
+    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert message.bot.deleted == [(100, message.reply_message_id)]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
 
 
 @pytest.mark.asyncio
@@ -409,7 +454,10 @@ async def test_navigator_home_uses_runtime_default_home(wizard) -> None:
 
     await scene.nav.home(step=2)
 
-    assert wizard.goto_calls == [("tests.demo", {"step": 2})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {"step": 2})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.demo", False, {"step": 2})]
 
 
 @pytest.mark.asyncio
@@ -420,7 +468,10 @@ async def test_navigator_role_home_uses_role_specific_target(wizard) -> None:
 
     await scene.nav.role_home(SceneRole.ADMIN)
 
-    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
 
 
 @pytest.mark.asyncio
@@ -443,7 +494,10 @@ async def test_navigator_back_can_route_home_via_back_target_override(wizard) ->
 
     await scene.nav.back(step=1)
 
-    assert wizard.goto_calls == [("tests.demo", {"step": 1})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {"step": 1})]
+    assert wizard.manager.history.cleared is True
+    assert wizard.manager.enter_calls == [("tests.demo", False, {"step": 1})]
     assert "_back_target" not in wizard.data
     assert wizard.back_calls == []
 

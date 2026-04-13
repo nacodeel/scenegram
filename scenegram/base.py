@@ -29,6 +29,7 @@ from .ui.keyboards import uses_message_reply_markup
 
 ModelT = TypeVar("ModelT")
 BACK_TARGET_HOME = "__scenegram_home__"
+HIDDEN_REPLY_TEXT = "\u2060"
 
 
 class SceneDataProxy:
@@ -172,7 +173,7 @@ class SceneNavigator:
     async def home(self, **kwargs: Any) -> None:
         target = self.scene.home_scene or RUNTIME.default_home
         if target:
-            await self.to(target, **kwargs)
+            await self.replace(target, reset_history=True, **kwargs)
             return
         await self.exit(**kwargs)
 
@@ -183,7 +184,7 @@ class SceneNavigator:
             or RUNTIME.default_home
         )
         if target:
-            await self.to(target, **kwargs)
+            await self.replace(target, reset_history=True, **kwargs)
             return
         await self.exit(**kwargs)
 
@@ -423,18 +424,32 @@ class AppScene(Scene, reset_history_on_enter=False):
         content: RenderableText | None,
         *,
         remove_reply_keyboard: bool = False,
+        transient: bool = False,
         replace_parse_mode: bool = True,
         **kwargs: Any,
     ) -> Any:
-        payload = render_text(content, replace_parse_mode=replace_parse_mode)
+        payload = render_text(
+            HIDDEN_REPLY_TEXT if content is None and remove_reply_keyboard else content,
+            replace_parse_mode=replace_parse_mode,
+        )
         if remove_reply_keyboard:
             payload["reply_markup"] = ReplyKeyboardRemove()
         payload.update(kwargs)
 
         reply = getattr(message, "reply", None)
         if callable(reply):
-            return await reply(**payload)
-        return await message.answer(**payload)
+            sent = await reply(**payload)
+        else:
+            sent = await message.answer(**payload)
+
+        if transient and getattr(message, "bot", None) is not None:
+            sent_message_id = getattr(sent, "message_id", None)
+            if sent_message_id is not None:
+                try:
+                    await message.bot.delete_message(message.chat.id, sent_message_id)
+                except TelegramBadRequest:
+                    pass
+        return sent
 
     async def resolve_roles(self, event: Any) -> set[str]:
         if RUNTIME.role_resolver is None:
@@ -475,7 +490,7 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _navigate_home(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
         if callback_data.target:
-            await self.nav.to(callback_data.target)
+            await self.nav.replace(callback_data.target, reset_history=True)
             return
         await self.nav.home()
 
@@ -483,7 +498,7 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _navigate_cancel(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer("Отменено")
         if callback_data.target:
-            await self.nav.to(callback_data.target)
+            await self.nav.replace(callback_data.target, reset_history=True)
             return
         await self.nav.home()
 
@@ -495,8 +510,9 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _cancel_command(self, message: Message) -> None:
         await self.reply_notice(
             message,
-            self.cancel_notice_text,
+            None,
             remove_reply_keyboard=True,
+            transient=True,
         )
         await self.nav.home()
 
@@ -504,8 +520,9 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _start_command(self, message: Message) -> None:
         await self.reply_notice(
             message,
-            self.home_notice_text,
+            None,
             remove_reply_keyboard=True,
+            transient=True,
         )
         await self.nav.home()
 
