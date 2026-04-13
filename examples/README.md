@@ -12,6 +12,7 @@
 - глобальный `service_container`;
 - auto-discovery сцен по пакету `examples.showcase_bot.scenes`;
 - mix ручных сцен и portable scene modules;
+- deep-link entry scene на `/start` и scene-attached deep links на target scenes;
 - cleanup policies и history-ready rendering;
 - secure scene transitions with role guards;
 - формы, question-level step carousel, пагинацию, CRUD pack и background broadcast.

@@ -6,11 +6,13 @@ from typing import Any
 
 from aiogram import F
 from aiogram.filters.callback_data import CallbackData
+from aiogram.filters.command import CommandObject
 from aiogram.fsm.scene import on
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.formatting import Bold, Text, as_key_value, as_list
 
 from .base import AppScene
+from .deep_links import _DeepLinkEntrySupport, deep_link_entrypoint
 from .formatting import RenderableText
 from .ui import Button, ReplyButton, inline_menu, nav_row, reply_menu, reply_nav_row
 
@@ -99,6 +101,65 @@ class MenuScene(AppScene):
     async def _on_callback_enter(self, call: CallbackQuery) -> None:
         await call.answer()
         await self.render_menu(call)
+
+
+class DeepLinkScene(_DeepLinkEntrySupport, AppScene):
+    __abstract__ = True
+    entrypoints = (deep_link_entrypoint(),)
+    start_text: RenderableText | None = None
+
+    async def start_content(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> RenderableText | None:
+        return self.start_text
+
+    async def start_markup(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> Any | None:
+        return None
+
+    async def on_plain_start(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> Any:
+        return await self.show(
+            message,
+            await self.start_content(message, command),
+            reply_markup=await self.start_markup(message, command),
+        )
+
+    @on.message.enter()
+    async def _on_message_enter(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> None:
+        await self.handle_start_entry(message, command)
+
+
+class DeepLinkMenuScene(_DeepLinkEntrySupport, MenuScene):
+    __abstract__ = True
+    entrypoints = (deep_link_entrypoint(),)
+
+    async def on_plain_start(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> Any:
+        return await self.render_menu(message)
+
+    @on.message.enter()
+    async def _on_message_enter(
+        self,
+        message: Message,
+        command: CommandObject | None = None,
+    ) -> None:
+        await self.handle_start_entry(message, command)
 
 
 class ConfirmAction(CallbackData, prefix="confirm"):
@@ -832,6 +893,8 @@ class FormScene(StepScene):
 __all__ = [
     "ConfirmAction",
     "ConfirmScene",
+    "DeepLinkMenuScene",
+    "DeepLinkScene",
     "FormAction",
     "FormField",
     "FormScene",

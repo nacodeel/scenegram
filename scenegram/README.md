@@ -8,6 +8,7 @@
 - `bootstrap.py` — discovery, descriptors, role-aware router assembly, scene registry bootstrap.
 - `cli.py` — CLI для `check` и генерации шаблонов сцен/модулей.
 - `contracts.py` — typed contracts для scene modules, middleware bindings, menu contributions, cleanup, CRUD и broadcast adapters.
+- `deep_links.py` — deep-link runtime, secure/stored token strategies, route helpers и start-scene integration.
 - `di.py` — mapping/composite/null containers и service resolution helpers.
 - `runtime.py` — shared runtime, cleanup defaults, module registry, menu contribution routing, task runner.
 - `history.py` — breadcrumbs proxy и отдельный screen-stack proxy поверх scene data.
@@ -36,6 +37,7 @@
 - role-aware routing и home scenes;
 - service container + module-local services;
 - typed state descriptors и mutation contexts поверх raw scene data;
+- deep-link entry scenes, scene-attached routes и stored/signed deep-link execution;
 - cleanup policies и breadcrumbs/history;
 - screen-stack navigation только по главным экранам сцен;
 - global/module/scene middlewares;
@@ -62,6 +64,7 @@
 - module manifests завязаны на package prefix, чтобы сцены автоматически связывались со своим модулем.
 - middleware применяются через wrapper-router на сцену, чтобы entrypoints и scene handlers шли через единый pipeline.
 - внутренние переходы дополнительно проверяются на роли через secure manager proxy, а не только через router filters.
+- deep links используют официальный Telegram/aiogram стартовый механизм, но route registry, one-time/ttl semantics и scene opening остаются внутри framework runtime.
 - reply keyboard на form/step сценах остаётся opt-out и удаляется на cancel через `ReplyKeyboardRemove`, а не через неявное поведение клиента.
 - глобальный `back` идёт по собственному scene screen stack, а не по промежуточным step/page/confirm состояниям.
 - `cancel` возвращает к `home_scene` текущей сцены без потери родительского back-stack, а `home`/`/start` выполняют root reset.

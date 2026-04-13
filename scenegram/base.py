@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover
 
 from ._utils import call_with_optional_args
 from .contracts import SceneActionConfig, SceneCleanup, SceneModule
+from .deep_links import SceneDeepLinksProxy
 from .di import UNSET, MissingServiceError, resolve_service_value
 from .formatting import RenderableText, render_text
 from .history import SceneHistoryProxy, SceneStackProxy
@@ -424,6 +425,7 @@ class AppScene(Scene, reset_history_on_enter=False):
         self.history = SceneHistoryProxy(self.data)
         self.stack = SceneStackProxy(self.data)
         self.nav = SceneNavigator(self)
+        self.deep_links = SceneDeepLinksProxy(self)
 
     @property
     def state_id(self) -> str:

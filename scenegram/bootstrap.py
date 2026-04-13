@@ -4,7 +4,7 @@ import importlib
 import inspect
 import pkgutil
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from aiogram import Router
@@ -12,7 +12,15 @@ from aiogram.filters import Command, Filter
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.scene import SceneRegistry
 
-from .contracts import SceneCleanup, SceneMiddleware, SceneModule, scene_middleware
+from .contracts import (
+    DeepLinkRoute,
+    DeepLinkStore,
+    SceneCleanup,
+    SceneMiddleware,
+    SceneModule,
+    scene_middleware,
+)
+from .deep_links import BUILTIN_REFERRAL_ROUTE, BUILTIN_SCENE_ROUTE, InMemoryDeepLinkStore
 from .di import adapt_container
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import DEFAULT_CLEANUP, RUNTIME, RoleResolver
@@ -46,6 +54,10 @@ class SceneBootstrapResult:
     descriptors: list[SceneDescriptor]
     scene_map: dict[str, type]
     modules: dict[str, SceneModule]
+
+
+def _reserved_deep_link_routes() -> set[str]:
+    return {BUILTIN_SCENE_ROUTE, BUILTIN_REFERRAL_ROUTE}
 
 
 class SecureScenesMiddleware:
@@ -339,6 +351,38 @@ def discover_scene_classes(
     return [descriptor.scene for descriptor in descriptors]
 
 
+def discover_deep_link_routes(
+    descriptors: Sequence[SceneDescriptor],
+    modules: Mapping[str, SceneModule],
+) -> list[DeepLinkRoute]:
+    discovered: dict[str, DeepLinkRoute] = {}
+    reserved = _reserved_deep_link_routes()
+
+    for scene_module in modules.values():
+        for route in scene_module.deep_links:
+            if route.name in reserved:
+                raise RuntimeError(f"Deep link route '{route.name}' is reserved by scenegram")
+            existing = discovered.get(route.name)
+            if existing is not None and existing != route:
+                raise RuntimeError(f"Deep link route collision for '{route.name}'")
+            discovered[route.name] = route
+
+    for descriptor in descriptors:
+        for route in tuple(getattr(descriptor.scene, "deep_links", ())):
+            if not isinstance(route, DeepLinkRoute):
+                continue
+            if route.scene is None and route.handler is None:
+                route = replace(route, scene=descriptor.state)
+            if route.name in reserved:
+                raise RuntimeError(f"Deep link route '{route.name}' is reserved by scenegram")
+            existing = discovered.get(route.name)
+            if existing is not None and existing != route:
+                raise RuntimeError(f"Deep link route collision for '{route.name}'")
+            discovered[route.name] = route
+
+    return [discovered[name] for name in sorted(discovered)]
+
+
 def create_scenes_router(
     package_name: str | Sequence[str] = "scenes.modules",
     *,
@@ -349,6 +393,8 @@ def create_scenes_router(
     scene_modules: Sequence[SceneModule] | None = None,
     cleanup: SceneCleanup | None = None,
     middlewares: Sequence[SceneMiddleware] | None = None,
+    deep_link_store: DeepLinkStore | None = None,
+    deep_link_secret: str | None = None,
 ) -> SceneBootstrapResult:
     from .base import AppScene
 
@@ -369,8 +415,11 @@ def create_scenes_router(
     RUNTIME.default_home = default_home
     RUNTIME.service_container = adapt_container(service_container)
     RUNTIME.cleanup = cleanup or DEFAULT_CLEANUP
+    RUNTIME.deep_link_secret = deep_link_secret
+    RUNTIME.deep_link_store = deep_link_store or InMemoryDeepLinkStore()
     RUNTIME.register_modules(discovered_modules.values())
     RUNTIME.register_descriptors(descriptors)
+    RUNTIME.register_deep_link_routes(discover_deep_link_routes(descriptors, discovered_modules))
     RUNTIME.register_callback_prefixes(
         {
             **_reserved_callback_prefixes(),

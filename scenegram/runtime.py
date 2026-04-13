@@ -6,6 +6,8 @@ from typing import Any
 
 from ._utils import maybe_await
 from .contracts import (
+    DeepLinkRoute,
+    DeepLinkStore,
     MenuContribution,
     SceneCleanup,
     SceneModule,
@@ -37,6 +39,9 @@ class SceneRuntime:
     scene_module_by_state: dict[str, str] = field(default_factory=dict)
     scene_map: dict[str, type] = field(default_factory=dict)
     callback_prefix_owners: dict[str, str] = field(default_factory=dict)
+    deep_link_secret: str | None = None
+    deep_link_store: DeepLinkStore | None = None
+    deep_link_routes: dict[str, DeepLinkRoute] = field(default_factory=dict)
     observers: list[SceneObserver] = field(default_factory=list)
     task_runner: SceneTaskRunner = field(default_factory=SceneTaskRunner)
 
@@ -50,6 +55,9 @@ class SceneRuntime:
         self.scene_module_by_state.clear()
         self.scene_map.clear()
         self.callback_prefix_owners.clear()
+        self.deep_link_secret = None
+        self.deep_link_store = None
+        self.deep_link_routes.clear()
         self.observers.clear()
         self.service_container = NullContainer()
         self.cleanup = DEFAULT_CLEANUP
@@ -136,6 +144,20 @@ class SceneRuntime:
         self.callback_prefix_owners.clear()
         for prefix, owner in bindings.items():
             self.register_callback_prefix(prefix, owner)
+
+    def register_deep_link_route(self, route: DeepLinkRoute) -> None:
+        existing = self.deep_link_routes.get(route.name)
+        if existing is not None and existing != route:
+            raise RuntimeError(f"Deep link route collision for '{route.name}'")
+        self.deep_link_routes[route.name] = route
+
+    def register_deep_link_routes(self, routes: Iterable[DeepLinkRoute]) -> None:
+        self.deep_link_routes.clear()
+        for route in routes:
+            self.register_deep_link_route(route)
+
+    def deep_link_route_for(self, name: str) -> DeepLinkRoute | None:
+        return self.deep_link_routes.get(name)
 
     def observe(self, callback: SceneObserver) -> None:
         self.observers.append(callback)

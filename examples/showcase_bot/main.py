@@ -32,6 +32,7 @@ def create_dispatcher() -> Dispatcher:
         role_resolver=resolve_roles,
         default_home="common.start",
         service_container=build_service_container(),
+        deep_link_secret=os.environ.get("DEEP_LINK_SECRET", "scenegram-showcase-secret"),
         cleanup=SceneCleanup(
             delete_previous_screen=True,
             delete_user_messages=False,

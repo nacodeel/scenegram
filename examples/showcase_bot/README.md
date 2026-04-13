@@ -28,6 +28,7 @@ showcase_bot/
 - подключает `create_scenes_router(...)`;
 - пробрасывает глобальный `service_container`;
 - задаёт глобальную cleanup policy;
+- задаёт `deep_link_secret` для signed deep links;
 - получает secure internal transitions и callback prefix validation автоматически.
 
 ### `services.py`
@@ -38,8 +39,10 @@ showcase_bot/
 
 ### `scenes/common/start.py`
 
-- обычное главное меню на `MenuScene`;
-- manual actions плюс auto-added вкладки от portable modules;
+- главное меню на `DeepLinkMenuScene`;
+- обычный `/start` рендерит меню;
+- `/start <payload>` проходит через built-in deep-link dispatcher;
+- custom referral route сохраняет данные и возвращает пользователя в меню;
 - нативное formatting через `aiogram.utils.formatting`.
 
 ### `scenes/common/catalog.py`
@@ -61,6 +64,7 @@ showcase_bot/
 - `SCENEGRAM_MODULE = crud_module(...)`;
 - module-local adapter живёт рядом со сценами;
 - пункт меню добавляется в `common.start` автоматически.
+- `CatalogDetailScene` показывает scene-attached deep link: route объявлен прямо на target scene и открывает карточку товара по `item_id`.
 
 ### `scenes/admin_broadcast.py`
 
@@ -78,7 +82,10 @@ showcase_bot/
 
 - держать adapters рядом с reusable scene modules;
 - пробрасывать bot-wide сервисы через `service_container`;
+- задавать `deep_link_secret` на bootstrap, если deep links должны быть подписанными и переживать перезапуск процесса;
 - использовать `SCENEGRAM_MODULE` для самоописания модулей;
+- использовать `DeepLinkMenuScene` как root `/start` scene, если бот должен открывать меню и одновременно поддерживать deep links;
+- вешать `deep_link_scene(...)` прямо на target scene, если эта сцена должна открываться по ссылке без отдельного routing-хендлера;
 - полагаться на `aiogram.utils.formatting`, а не на HTML-строки;
 - использовать auto reply-keyboards на `StepScene` / `FormScene` и удалять их через built-in cancel flow;
 - включать `step_pagination = True` только там, где форма должна разрешать question-level navigation;

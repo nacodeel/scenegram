@@ -20,6 +20,7 @@
 ## Что уже реализовано
 
 - главное меню и onboarding flow;
+- deep-link start scene и scene-attached route на catalog detail;
 - простая пагинация;
 - portable CRUD module;
 - portable background broadcast module;

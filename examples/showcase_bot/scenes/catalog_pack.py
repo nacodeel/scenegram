@@ -6,6 +6,7 @@ from scenegram import (
     CrudDetailScene,
     CrudListScene,
     crud_module,
+    deep_link_scene,
 )
 
 SCENEGRAM_MODULE = crud_module(
@@ -33,6 +34,13 @@ class CatalogDetailScene(CrudDetailScene, state="catalog.detail"):
     list_scene = "catalog.list"
     delete_scene = "catalog.delete"
     title = "Product detail"
+    deep_links = (
+        deep_link_scene(
+            "showcase.catalog.product",
+            payload_key="item_id",
+            back_target="catalog.list",
+        ),
+    )
 
 
 class CatalogDeleteScene(CrudDeleteScene, state="catalog.delete"):

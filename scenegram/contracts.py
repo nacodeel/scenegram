@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from datetime import UTC, datetime
+from typing import Any, Literal, Protocol
 
 from aiogram.enums import ChatAction as TelegramChatAction
 
@@ -10,6 +11,8 @@ Provider = Callable[..., Any]
 ProviderValue = Any | Provider
 RoleSet = frozenset[str]
 ObserverSet = frozenset[str]
+DeepLinkKind = Literal["start", "startgroup", "startapp"]
+DeepLinkDelivery = Literal["auto", "plain", "signed", "stored"]
 
 
 class SupportsResolve(Protocol):
@@ -93,6 +96,7 @@ class SceneModule:
     description: str = ""
     services: Mapping[str, ProviderValue] = field(default_factory=dict)
     menu_entries: tuple[MenuContribution, ...] = ()
+    deep_links: tuple[DeepLinkRoute, ...] = ()
     middlewares: tuple[SceneMiddleware, ...] = ()
     tags: frozenset[str] = frozenset()
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -108,6 +112,7 @@ class SceneModule:
             description=self.description,
             services=merged,
             menu_entries=self.menu_entries,
+            deep_links=self.deep_links,
             middlewares=self.middlewares,
             tags=self.tags,
             metadata=self.metadata,
@@ -122,6 +127,22 @@ class SceneModule:
             description=self.description,
             services=self.services,
             menu_entries=(*self.menu_entries, *entries),
+            deep_links=self.deep_links,
+            middlewares=self.middlewares,
+            tags=self.tags,
+            metadata=self.metadata,
+            setup=self.setup,
+        )
+
+    def with_deep_links(self, *routes: DeepLinkRoute) -> SceneModule:
+        return SceneModule(
+            name=self.name,
+            package_name=self.package_name,
+            title=self.title,
+            description=self.description,
+            services=self.services,
+            menu_entries=self.menu_entries,
+            deep_links=(*self.deep_links, *routes),
             middlewares=self.middlewares,
             tags=self.tags,
             metadata=self.metadata,
@@ -136,6 +157,7 @@ class SceneModule:
             description=self.description,
             services=self.services,
             menu_entries=self.menu_entries,
+            deep_links=self.deep_links,
             middlewares=(*self.middlewares, *middlewares),
             tags=self.tags,
             metadata=self.metadata,
@@ -150,6 +172,159 @@ class SceneObserverEvent:
     target_state: str | None = None
     update_type: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class DeepLinkPolicy:
+    kind: DeepLinkKind = "start"
+    secure: bool = True
+    strategy: DeepLinkDelivery = "auto"
+    ttl_seconds: int | None = None
+    max_uses: int | None = None
+    app_name: str | None = None
+    user_id: int | None = None
+    roles: RoleSet = field(default_factory=lambda: frozenset({"any"}))
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def permanent(
+        cls,
+        *,
+        kind: DeepLinkKind = "start",
+        secure: bool = True,
+        strategy: DeepLinkDelivery = "auto",
+        app_name: str | None = None,
+        user_id: int | None = None,
+        roles: RoleSet | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> DeepLinkPolicy:
+        return cls(
+            kind=kind,
+            secure=secure,
+            strategy=strategy,
+            app_name=app_name,
+            user_id=user_id,
+            roles=frozenset({"any"}) if roles is None else frozenset(roles),
+            metadata=dict(metadata or {}),
+        )
+
+    @classmethod
+    def temporary(
+        cls,
+        ttl_seconds: int,
+        *,
+        kind: DeepLinkKind = "start",
+        secure: bool = True,
+        strategy: DeepLinkDelivery = "auto",
+        app_name: str | None = None,
+        user_id: int | None = None,
+        roles: RoleSet | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> DeepLinkPolicy:
+        return cls(
+            kind=kind,
+            secure=secure,
+            strategy=strategy,
+            ttl_seconds=ttl_seconds,
+            app_name=app_name,
+            user_id=user_id,
+            roles=frozenset({"any"}) if roles is None else frozenset(roles),
+            metadata=dict(metadata or {}),
+        )
+
+    @classmethod
+    def one_time(
+        cls,
+        *,
+        ttl_seconds: int | None = None,
+        kind: DeepLinkKind = "start",
+        secure: bool = True,
+        strategy: DeepLinkDelivery = "auto",
+        app_name: str | None = None,
+        user_id: int | None = None,
+        roles: RoleSet | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> DeepLinkPolicy:
+        return cls(
+            kind=kind,
+            secure=secure,
+            strategy=strategy,
+            ttl_seconds=ttl_seconds,
+            max_uses=1,
+            app_name=app_name,
+            user_id=user_id,
+            roles=frozenset({"any"}) if roles is None else frozenset(roles),
+            metadata=dict(metadata or {}),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class DeepLinkTarget:
+    scene: str
+    kwargs: Mapping[str, Any] = field(default_factory=dict)
+    action: Literal["to", "replace"] = "replace"
+    back_target: str | None = None
+    reset_history: bool = True
+
+
+@dataclass(slots=True, frozen=True)
+class DeepLinkRoute:
+    name: str
+    scene: str | None = None
+    handler: ModuleCallback | str | None = None
+    parser: ModuleCallback | str | None = None
+    payload_key: str | None = None
+    roles: RoleSet = field(default_factory=lambda: frozenset({"any"}))
+    back_target: str | None = None
+    action: Literal["to", "replace"] = "replace"
+    reset_history: bool = True
+    description: str = ""
+    policy: DeepLinkPolicy = field(default_factory=DeepLinkPolicy)
+
+
+@dataclass(slots=True, frozen=True)
+class DeepLinkContext:
+    route: str
+    payload: Any = None
+    token: str = ""
+    transport: Literal["plain", "signed", "stored"] = "plain"
+    kind: DeepLinkKind = "start"
+    secure: bool = True
+    roles: RoleSet = field(default_factory=lambda: frozenset({"any"}))
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    expires_at: datetime | None = None
+    remaining_uses: int | None = None
+    user_id: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class DeepLinkTicket:
+    token: str
+    route: str
+    payload: Any = None
+    kind: DeepLinkKind = "start"
+    secure: bool = True
+    roles: RoleSet = field(default_factory=lambda: frozenset({"any"}))
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
+    expires_at: datetime | None = None
+    max_uses: int | None = None
+    uses: int = 0
+    user_id: int | None = None
+
+
+class DeepLinkStore(Protocol):
+    async def issue(self, ticket: DeepLinkTicket) -> None: ...
+
+    async def consume(
+        self,
+        token: str,
+        *,
+        user_id: int | None = None,
+        now: datetime | None = None,
+    ) -> DeepLinkTicket: ...
+
+    async def revoke(self, token: str) -> None: ...
 
 
 @dataclass(slots=True, frozen=True)

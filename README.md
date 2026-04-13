@@ -87,6 +87,111 @@ Role-фильтры теперь применяются не только на e
 - `self.nav.to(...)`, `self.nav.replace(...)`, `wizard.goto(...)` и `ScenesManager.enter(...)` проходят через guard;
 - при запрете перехода пользователь получает короткий notice, а framework не кладёт forbidden scene в stack.
 
+### 3.3. Deep links как часть scene-layer
+
+Scenegram теперь работает с deep links не как с ручным `/start ...`, а как с частью scene framework.
+
+Поддерживаются два паттерна одновременно:
+
+- `DeepLinkMenuScene` / `DeepLinkScene` — стартовая сцена, которая ловит `/start`, разбирает payload и открывает нужный flow;
+- `deep_link_scene(...)` / `deep_link_handler(...)` — декларативные deep-link routes, которые можно объявлять на start scene, на portable `SceneModule` или прямо на target scene.
+
+Bootstrap:
+
+```python
+create_scenes_router(
+    package_name="bot.scenes",
+    default_home="common.start",
+    deep_link_secret="stable-secret",
+)
+```
+
+- `deep_link_secret` включает signed inline deep links;
+- если payload большой, ссылка временная или one-time, scenegram автоматически использует opaque stored token;
+- для production можно передать свой `deep_link_store`, если нужна Redis/DB-backed реализация.
+
+Стартовая сцена:
+
+```python
+from scenegram import DeepLinkMenuScene, deep_link_handler
+
+
+class StartScene(DeepLinkMenuScene, state="common.start"):
+    __abstract__ = False
+    deep_links = (
+        deep_link_handler("app.referral", "handle_referral"),
+    )
+
+    async def handle_referral(self, event, context):
+        payload = dict(context.payload or {})
+        await self.data.update(referrer_id=payload.get("referrer_id"))
+        return await self.render_menu(event)
+```
+
+Deep link прямо на target scene:
+
+```python
+from scenegram import CrudDetailScene, deep_link_scene
+
+
+class CatalogDetailScene(CrudDetailScene, state="catalog.detail"):
+    __abstract__ = False
+    deep_links = (
+        deep_link_scene(
+            "catalog.product",
+            payload_key="item_id",
+            back_target="catalog.list",
+        ),
+    )
+```
+
+Route автоматически привяжется к `catalog.detail`, даже если state не указан в helper-е.
+
+Генерация ссылок внутри сцены:
+
+```python
+# постоянная ссылка на сцену
+scene_link = await self.deep_links.scene(
+    "catalog.detail",
+    payload={"item_id": "starter"},
+    back_target="catalog.list",
+)
+
+# временная ссылка
+temporary = await self.deep_links.temporary_scene(
+    "catalog.detail",
+    ttl_seconds=300,
+    payload={"item_id": "starter"},
+)
+
+# one-time ссылка
+one_time = await self.deep_links.one_time_scene(
+    "admin.broadcast",
+    ttl_seconds=300,
+    roles={"admin"},
+)
+
+# реферальная ссылка
+referral = await self.deep_links.referral(
+    referrer_id=message.from_user.id,
+    campaign="spring",
+    target_scene="common.start",
+)
+
+# кастомный route
+promo = await self.deep_links.create(
+    "app.referral",
+    {"referrer_id": message.from_user.id},
+)
+```
+
+Что это даёт:
+
+- deep link может открыть меню, сцену, товар, админскую функцию или отдельный form flow;
+- есть signed, temporary, permanent и one-time режимы;
+- back-навигация остаётся логичной через `back_target`;
+- доступ проверяется и на уровне route, и на уровне target scene.
+
 ### 4. Cleanup policies
 
 Глобально и локально можно управлять:
@@ -341,6 +446,7 @@ scenegram/
 ├── bootstrap.py         # discovery, descriptors, router assembly
 ├── cli.py               # scenegram CLI (check / generate)
 ├── contracts.py         # typed contracts и module manifests
+├── deep_links.py        # deep-link runtime, tokens, route helpers
 ├── di.py                # containers/adapters
 ├── runtime.py           # runtime state и defaults
 ├── history.py           # breadcrumbs/history proxy
@@ -425,6 +531,7 @@ def create_dispatcher() -> Dispatcher:
         role_resolver=resolve_roles,
         default_home="common.start",
         service_container=build_service_container(),
+        deep_link_secret="stable-secret",
         cleanup=SceneCleanup(
             delete_previous_screen=True,
             delete_user_messages=False,
@@ -440,13 +547,15 @@ def create_dispatcher() -> Dispatcher:
 ```python
 from aiogram.utils.formatting import Bold, as_list, as_marked_list
 
-from scenegram import Button, MenuScene, Navigate, SceneRole, command_entry
+from scenegram import Button, DeepLinkMenuScene, Navigate, SceneRole, deep_link_handler
 
 
-class StartScene(MenuScene, state="common.start"):
+class StartScene(DeepLinkMenuScene, state="common.start"):
     __abstract__ = False
-    entrypoints = (command_entry("start"),)
     home_for_roles = frozenset({SceneRole.USER.value, SceneRole.ADMIN.value})
+    deep_links = (
+        deep_link_handler("app.referral", "handle_referral"),
+    )
 
     async def menu_content(self, event):
         return as_list(
@@ -464,6 +573,11 @@ class StartScene(MenuScene, state="common.start"):
             [Button(text="🧭 Анкета", callback_data=Navigate.open("common.onboarding"))],
             [Button(text="🗑 Очистить черновик", callback_data=Navigate.open("common.delete"))],
         ]
+
+    async def handle_referral(self, event, context):
+        payload = dict(context.payload or {})
+        await self.data.update(referrer_id=payload.get("referrer_id"))
+        return await self.render_menu(event)
 ```
 
 ### 4. FormScene с cleanup policy и DI
@@ -609,10 +723,15 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 - `SceneCleanup`
 - `SceneActionConfig`
 - `create_scenes_router(...)`
+- `DeepLinkManager`
+- `deep_link_scene(...)`
+- `deep_link_handler(...)`
 
 ### Patterns
 
 - `MenuScene`
+- `DeepLinkMenuScene`
+- `DeepLinkScene`
 - `PaginatedScene`
 - `ConfirmScene`
 - `StepScene`

@@ -5,6 +5,7 @@
 ## Что внутри
 
 - `start.py` — главное меню;
+- `start.py` — root `/start` scene на `DeepLinkMenuScene`;
 - `catalog.py` — ручной пример `PaginatedScene`;
 - `delete.py` — ручной пример `ConfirmScene`;
 - `onboarding.py` — форма на `FormScene`.
@@ -16,6 +17,7 @@
 ## Что уже реализовано
 
 - menu hub;
+- built-in deep-link entrypoint на `/start` и referral route на start scene;
 - pagination flow;
 - confirm flow;
 - cleanup-aware onboarding form с auto reply-кнопкой `Отмена` и question-level step carousel;
