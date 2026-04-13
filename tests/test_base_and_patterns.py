@@ -210,11 +210,11 @@ async def test_cancel_text_replies_with_keyboard_remove_and_navigates_home(wizar
 
     await scene._cancel_text(message)
 
-    assert message.reply_calls[0]["text"] == "Отменено"
-    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert message.answer_calls[0]["text"] == "Отменено"
+    assert isinstance(message.answer_calls[0]["reply_markup"], ReplyKeyboardRemove)
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
-    assert wizard.manager.history.cleared is True
+    assert wizard.manager.history.cleared is False
     assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
 
 
@@ -228,8 +228,8 @@ async def test_home_text_replies_with_keyboard_remove_and_navigates_home(wizard)
 
     await scene._home_text(message)
 
-    assert message.reply_calls[0]["text"] == scene.home_notice_text
-    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert message.answer_calls[0]["text"] == scene.home_notice_text
+    assert isinstance(message.answer_calls[0]["reply_markup"], ReplyKeyboardRemove)
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.history.cleared is True
@@ -262,17 +262,18 @@ async def test_start_command_removes_keyboard_without_visible_notice(wizard) -> 
 
     scene = DemoScene(wizard)
     scene.home_scene = "tests.confirm"
+    RUNTIME.default_home = "tests.start"
     message = FakeMessage(text="/start")
 
     await scene._start_command(message)
 
-    assert message.reply_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
-    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
-    assert message.bot.deleted == [(100, message.reply_message_id)]
+    assert message.answer_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
+    assert isinstance(message.answer_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert message.bot.deleted == [(100, message.answer_message_id)]
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.history.cleared is True
-    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
+    assert wizard.manager.enter_calls == [("tests.start", False, {})]
 
 
 @pytest.mark.asyncio

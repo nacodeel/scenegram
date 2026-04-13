@@ -55,6 +55,7 @@
 - middleware применяются через wrapper-router на сцену, чтобы entrypoints и scene handlers шли через единый pipeline.
 - reply keyboard на form/step сценах остаётся opt-out и удаляется на cancel через `ReplyKeyboardRemove`, а не через неявное поведение клиента.
 - глобальный `back` идёт по собственному scene screen stack, а не по промежуточным step/page/confirm состояниям.
+- `cancel` возвращает к `home_scene` текущей сцены без потери родительского back-stack, а `home`/`/start` выполняют root reset.
 
 ## Правила расширения
 

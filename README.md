@@ -63,6 +63,8 @@ await self.services.call("audit_logger", "message")
 - `main -> admin -> broadcast` вернёт `broadcast -> admin -> main`;
 - пагинация, form steps, confirm-step и другие внутренние рендеры не засоряют back-stack;
 - same-scene refresh/update не создаёт новых history entries.
+- `cancel` закрывает текущую сцену к её `home_scene`, сохраняя родительский back-stack;
+- `home` и `/start` считаются root-navigation и сбрасывают стек до целевого root screen.
 
 Глобально:
 

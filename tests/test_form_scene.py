@@ -119,11 +119,10 @@ async def test_form_scene_cancel_text_bypasses_validation_and_navigates_home(wiz
 
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
-    assert wizard.manager.history.cleared is True
+    assert wizard.manager.history.cleared is False
     assert wizard.manager.enter_calls == [("tests.home", False, {})]
-    assert message.answer_calls == []
-    assert message.reply_calls[0]["text"] == "Отменено"
-    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert message.answer_calls[0]["text"] == "Отменено"
+    assert isinstance(message.answer_calls[0]["reply_markup"], ReplyKeyboardRemove)
     assert "email" not in wizard.data
 
 
@@ -134,6 +133,7 @@ async def test_form_scene_start_command_bypasses_validation_and_navigates_home(w
     wizard.data = {"_step": "field__email"}
     scene = DemoFormScene(wizard)
     scene.home_scene = "tests.home"
+    base_module.RUNTIME.default_home = "tests.start"
     message = FakeMessage(text="/start")
 
     await scene._on_step_input(message)
@@ -141,11 +141,10 @@ async def test_form_scene_start_command_bypasses_validation_and_navigates_home(w
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.history.cleared is True
-    assert wizard.manager.enter_calls == [("tests.home", False, {})]
-    assert message.answer_calls == []
-    assert message.reply_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
-    assert message.bot.deleted == [(100, message.reply_message_id)]
-    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert wizard.manager.enter_calls == [("tests.start", False, {})]
+    assert message.answer_calls[0]["text"] == base_module.HIDDEN_REPLY_TEXT
+    assert message.bot.deleted == [(100, message.answer_message_id)]
+    assert isinstance(message.answer_calls[0]["reply_markup"], ReplyKeyboardRemove)
     assert "email" not in wizard.data
 
 

@@ -162,6 +162,13 @@ class SceneNavigator:
         await self.scene.history.pop()
         await self.replace(target, sync_stack=False, **kwargs)
 
+    async def cancel(self, **kwargs: Any) -> None:
+        target = self.scene.home_scene or RUNTIME.default_home
+        if target:
+            await self.back_to(target, **kwargs)
+            return
+        await self.exit(**kwargs)
+
     async def replace(
         self,
         target: type[Scene] | str,
@@ -220,6 +227,13 @@ class SceneNavigator:
 
     async def home(self, **kwargs: Any) -> None:
         target = self.scene.home_scene or RUNTIME.default_home
+        if target:
+            await self.replace(target, reset_history=True, **kwargs)
+            return
+        await self.exit(**kwargs)
+
+    async def start(self, **kwargs: Any) -> None:
+        target = RUNTIME.default_home or self.scene.home_scene
         if target:
             await self.replace(target, reset_history=True, **kwargs)
             return
@@ -490,11 +504,7 @@ class AppScene(Scene, reset_history_on_enter=False):
             payload["reply_markup"] = ReplyKeyboardRemove()
         payload.update(kwargs)
 
-        reply = getattr(message, "reply", None)
-        if callable(reply):
-            sent = await reply(**payload)
-        else:
-            sent = await message.answer(**payload)
+        sent = await message.answer(**payload)
 
         if transient and getattr(message, "bot", None) is not None:
             sent_message_id = getattr(sent, "message_id", None)
@@ -552,9 +562,9 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _navigate_cancel(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer("Отменено")
         if callback_data.target:
-            await self.nav.replace(callback_data.target, reset_history=True)
+            await self.nav.back_to(callback_data.target)
             return
-        await self.nav.home()
+        await self.nav.cancel()
 
     @on.callback_query(F.data == "noop")
     async def _noop(self, call: CallbackQuery) -> None:
@@ -568,7 +578,7 @@ class AppScene(Scene, reset_history_on_enter=False):
             remove_reply_keyboard=True,
             transient=True,
         )
-        await self.nav.home()
+        await self.nav.cancel()
 
     @on.message(Command("start"))
     async def _start_command(self, message: Message) -> None:
@@ -578,7 +588,7 @@ class AppScene(Scene, reset_history_on_enter=False):
             remove_reply_keyboard=True,
             transient=True,
         )
-        await self.nav.home()
+        await self.nav.start()
 
     @on.message(F.text == "Отмена")
     async def _cancel_text(self, message: Message) -> None:
@@ -587,7 +597,7 @@ class AppScene(Scene, reset_history_on_enter=False):
             self.cancel_notice_text,
             remove_reply_keyboard=True,
         )
-        await self.nav.home()
+        await self.nav.cancel()
 
     @on.message(F.text == "Назад")
     async def _back_text(self, message: Message) -> None:
