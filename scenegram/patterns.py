@@ -185,6 +185,9 @@ class StepScene(AppScene):
     reply_navigation_home = False
     reply_navigation_cancel = True
     reply_resize_keyboard = True
+    reply_navigation_back_text = "Назад"
+    reply_navigation_home_text = "Домой"
+    reply_navigation_cancel_text = "Отмена"
 
     @classmethod
     def declared_steps(cls) -> tuple[str, ...]:
@@ -224,6 +227,9 @@ class StepScene(AppScene):
             back=self.reply_navigation_back,
             home=self.reply_navigation_home,
             cancel=self.reply_navigation_cancel,
+            back_text=self.reply_navigation_back_text,
+            home_text=self.reply_navigation_home_text,
+            cancel_text=self.reply_navigation_cancel_text,
         )
         if navigation:
             rows.append(navigation)
@@ -317,6 +323,42 @@ class StepScene(AppScene):
     async def on_complete(self, event: Message | CallbackQuery) -> Any:
         await self.nav.exit()
 
+    async def reply_navigation_action(self, text: str | None) -> str | None:
+        if text is None:
+            return None
+        normalized = text.strip()
+        if not normalized:
+            return None
+        if self.reply_navigation_cancel and normalized == self.reply_navigation_cancel_text:
+            return "cancel"
+        if self.reply_navigation_home and normalized == self.reply_navigation_home_text:
+            return "home"
+        if self.reply_navigation_back and normalized == self.reply_navigation_back_text:
+            return "back"
+        return None
+
+    async def handle_reply_navigation_input(self, message: Message) -> bool:
+        normalized = (message.text or "").strip()
+        command = normalized.split(maxsplit=1)[0].lower() if normalized else ""
+        if command == "/cancel":
+            await self._cancel_command(message)
+            return True
+        if command == "/start":
+            await self._start_command(message)
+            return True
+
+        action = await self.reply_navigation_action(message.text)
+        if action == "cancel":
+            await self._cancel_text(message)
+            return True
+        if action == "home":
+            await self._home_text(message)
+            return True
+        if action == "back":
+            await self._back_text(message)
+            return True
+        return False
+
     async def save_step_input(self, message: Message) -> dict[str, Any]:
         step_name = await self.current_step()
         return await self.data.update({self.step_storage_key(step_name): message.text})
@@ -338,6 +380,9 @@ class StepScene(AppScene):
 
     @on.message(F.text)
     async def _on_step_input(self, message: Message) -> None:
+        if await self.handle_reply_navigation_input(message):
+            return
+
         step_name = await self.current_step()
         handler = getattr(self, f"handle_{step_name}", None)
 

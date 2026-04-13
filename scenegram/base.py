@@ -500,6 +500,15 @@ class AppScene(Scene, reset_history_on_enter=False):
         )
         await self.nav.home()
 
+    @on.message(Command("start"))
+    async def _start_command(self, message: Message) -> None:
+        await self.reply_notice(
+            message,
+            self.home_notice_text,
+            remove_reply_keyboard=True,
+        )
+        await self.nav.home()
+
     @on.message(F.text == "Отмена")
     async def _cancel_text(self, message: Message) -> None:
         await self.reply_notice(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 import scenegram.base as base_module
 from scenegram import FormAction, FormField, FormScene, ReplyButton, StepAction, step_nav_row
@@ -104,6 +104,42 @@ async def test_form_scene_validation_error_keeps_current_step(wizard) -> None:
     assert wizard.data.get("_step") is None
     assert "Возраст должен быть не меньше 18." in message.answer_calls[-1]["text"]
     assert message.answer_calls[-1]["reply_markup"].keyboard[0][0].text == "Отмена"
+
+
+@pytest.mark.asyncio
+async def test_form_scene_cancel_text_bypasses_validation_and_navigates_home(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__email"}
+    scene = DemoFormScene(wizard)
+    scene.home_scene = "tests.home"
+    message = FakeMessage(text="Отмена")
+
+    await scene._on_step_input(message)
+
+    assert wizard.goto_calls == [("tests.home", {})]
+    assert message.answer_calls == []
+    assert message.reply_calls[0]["text"] == "Отменено"
+    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert "email" not in wizard.data
+
+
+@pytest.mark.asyncio
+async def test_form_scene_start_command_bypasses_validation_and_navigates_home(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__email"}
+    scene = DemoFormScene(wizard)
+    scene.home_scene = "tests.home"
+    message = FakeMessage(text="/start")
+
+    await scene._on_step_input(message)
+
+    assert wizard.goto_calls == [("tests.home", {})]
+    assert message.answer_calls == []
+    assert message.reply_calls[0]["text"] == scene.home_notice_text
+    assert isinstance(message.reply_calls[0]["reply_markup"], ReplyKeyboardRemove)
+    assert "email" not in wizard.data
 
 
 @pytest.mark.asyncio
