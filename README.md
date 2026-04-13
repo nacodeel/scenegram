@@ -9,7 +9,7 @@
 - portable scene modules, которые можно переносить между ботами вместе с логикой;
 - встроенные patterns для menu, pagination, confirm, step, forms, CRUD и background broadcast;
 - нативная поддержка `aiogram.utils.formatting` без собственного markup DSL;
-- service container, module-local adapters, cleanup policies, breadcrumbs/history, scene middlewares и chat actions.
+- service container, module-local adapters, cleanup policies, scene-level screen history, middlewares и chat actions.
 
 ## Что теперь умеет framework
 
@@ -57,6 +57,12 @@ await self.services.call("audit_logger", "message")
 - удалением предыдущего screen message;
 - удалением пользовательских сообщений;
 - сохранением breadcrumbs/history.
+
+При этом back-навигация хранит именно стек главных экранов сцен:
+
+- `main -> admin -> broadcast` вернёт `broadcast -> admin -> main`;
+- пагинация, form steps, confirm-step и другие внутренние рендеры не засоряют back-stack;
+- same-scene refresh/update не создаёт новых history entries.
 
 Глобально:
 

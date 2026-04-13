@@ -118,6 +118,7 @@ async def test_show_supports_aiogram_formatting_entities(wizard) -> None:
     payload = event.answer_calls[0]
     assert payload["text"] == "Hello, Alex!"
     assert payload["entities"][0].type == MessageEntityType.BOLD
+    assert wizard.data["_scene_stack"] == ["tests.demo"]
 
 
 @pytest.mark.asyncio
@@ -458,6 +459,7 @@ async def test_navigator_home_uses_runtime_default_home(wizard) -> None:
     assert wizard.leave_calls == [(False, {"step": 2})]
     assert wizard.manager.history.cleared is True
     assert wizard.manager.enter_calls == [("tests.demo", False, {"step": 2})]
+    assert wizard.data["_scene_stack"] == ["tests.demo"]
 
 
 @pytest.mark.asyncio
@@ -472,16 +474,20 @@ async def test_navigator_role_home_uses_role_specific_target(wizard) -> None:
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.history.cleared is True
     assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
+    assert wizard.data["_scene_stack"] == ["tests.confirm"]
 
 
 @pytest.mark.asyncio
 async def test_navigator_back_uses_back_target_override(wizard) -> None:
     scene = DemoScene(wizard)
-    wizard.data = {"_back_target": "tests.confirm"}
+    wizard.data = {"_back_target": "tests.confirm", "_scene_stack": ["tests.menu", "tests.demo"]}
 
     await scene.nav.back()
 
-    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert wizard.goto_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.enter_calls == [("tests.confirm", False, {})]
+    assert wizard.data["_scene_stack"] == ["tests.confirm"]
     assert "_back_target" not in wizard.data
     assert wizard.back_calls == []
 
@@ -490,7 +496,10 @@ async def test_navigator_back_uses_back_target_override(wizard) -> None:
 async def test_navigator_back_can_route_home_via_back_target_override(wizard) -> None:
     scene = DemoScene(wizard)
     scene.home_scene = "tests.demo"
-    wizard.data = {"_back_target": BACK_TARGET_HOME}
+    wizard.data = {
+        "_back_target": BACK_TARGET_HOME,
+        "_scene_stack": ["tests.menu", "tests.confirm"],
+    }
 
     await scene.nav.back(step=1)
 
@@ -498,6 +507,7 @@ async def test_navigator_back_can_route_home_via_back_target_override(wizard) ->
     assert wizard.leave_calls == [(False, {"step": 1})]
     assert wizard.manager.history.cleared is True
     assert wizard.manager.enter_calls == [("tests.demo", False, {"step": 1})]
+    assert wizard.data["_scene_stack"] == ["tests.demo"]
     assert "_back_target" not in wizard.data
     assert wizard.back_calls == []
 
@@ -511,6 +521,7 @@ async def test_navigator_replace_enters_target_without_snapshotting_current_scen
     assert wizard.manager.history.cleared is True
     assert wizard.leave_calls == [(False, {"page": 2})]
     assert wizard.manager.enter_calls == [("tests.confirm", False, {"page": 2})]
+    assert wizard.data["_scene_stack"] == ["tests.confirm"]
 
 
 @pytest.mark.asyncio
@@ -529,6 +540,32 @@ async def test_navigate_open_replaces_current_scene_without_duplicating_history(
     assert wizard.goto_calls == []
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.enter_calls == [("tests.demo", False, {})]
+    assert wizard.data["_scene_stack"] == ["tests.demo"]
+
+
+@pytest.mark.asyncio
+async def test_navigator_to_pushes_target_scene_to_screen_stack(wizard) -> None:
+    scene = DemoScene(wizard)
+    wizard.data = {"_scene_stack": ["tests.menu", "tests.demo"]}
+
+    await scene.nav.to("tests.confirm")
+
+    assert wizard.goto_calls == [("tests.confirm", {})]
+    assert wizard.data["_scene_stack"] == ["tests.menu", "tests.demo", "tests.confirm"]
+
+
+@pytest.mark.asyncio
+async def test_navigator_back_uses_custom_scene_stack_before_aiogram_history(wizard) -> None:
+    scene = DemoScene(wizard)
+    wizard.data = {"_scene_stack": ["tests.menu", "tests.list", "tests.demo"]}
+
+    await scene.nav.back()
+
+    assert wizard.goto_calls == []
+    assert wizard.back_calls == []
+    assert wizard.leave_calls == [(False, {})]
+    assert wizard.manager.enter_calls == [("tests.list", False, {})]
+    assert wizard.data["_scene_stack"] == ["tests.menu", "tests.list"]
 
 
 @pytest.mark.asyncio

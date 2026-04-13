@@ -6,11 +6,10 @@
 
 - `base.py` — `AppScene`, data/services/history/navigation proxies, render pipeline, cleanup, chat actions.
 - `bootstrap.py` — discovery, descriptors, role-aware router assembly, scene registry bootstrap.
-- `contracts.py` — typed contracts для scene modules, menu contributions, cleanup, CRUD и broadcast adapters.
 - `contracts.py` — typed contracts для scene modules, middleware bindings, menu contributions, cleanup, CRUD и broadcast adapters.
 - `di.py` — mapping/composite/null containers и service resolution helpers.
 - `runtime.py` — shared runtime, cleanup defaults, module registry, menu contribution routing, task runner.
-- `history.py` — breadcrumbs/history proxy поверх scene data.
+- `history.py` — breadcrumbs proxy и отдельный screen-stack proxy поверх scene data.
 - `tasks.py` — in-process background task runner для модульных сцен.
 - `patterns.py` — `MenuScene`, `ConfirmScene`, `StepScene`, `FormScene`.
 - `packs.py` — built-in CRUD scene pack и `crud_module(...)`.
@@ -33,6 +32,7 @@
 - role-aware routing и home scenes;
 - service container + module-local services;
 - cleanup policies и breadcrumbs/history;
+- screen-stack navigation только по главным экранам сцен;
 - global/module/scene middlewares;
 - declarative chat actions;
 - step/forms с typed result model и auto reply-keyboards на input-экранах;
@@ -54,6 +54,7 @@
 - module manifests завязаны на package prefix, чтобы сцены автоматически связывались со своим модулем.
 - middleware применяются через wrapper-router на сцену, чтобы entrypoints и scene handlers шли через единый pipeline.
 - reply keyboard на form/step сценах остаётся opt-out и удаляется на cancel через `ReplyKeyboardRemove`, а не через неявное поведение клиента.
+- глобальный `back` идёт по собственному scene screen stack, а не по промежуточным step/page/confirm состояниям.
 
 ## Правила расширения
 

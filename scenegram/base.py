@@ -21,7 +21,7 @@ from ._utils import call_with_optional_args
 from .contracts import SceneActionConfig, SceneCleanup, SceneModule
 from .di import UNSET, MissingServiceError, resolve_service_value
 from .formatting import RenderableText, render_text
-from .history import SceneHistoryProxy
+from .history import SceneHistoryProxy, SceneStackProxy
 from .roles import SceneRole, normalize_role, normalize_roles
 from .runtime import RUNTIME
 from .ui.callbacks import Navigate
@@ -131,21 +131,59 @@ class SceneNavigator:
     def __init__(self, scene: AppScene) -> None:
         self.scene = scene
 
+    def _target_state(self, target: type[Scene] | str) -> str | None:
+        if isinstance(target, str):
+            return target
+        scene_config = getattr(target, "__scene_config__", None)
+        state = getattr(scene_config, "state", None)
+        if state is None:
+            return None
+        return str(state)
+
     async def to(self, target: type[Scene] | str, **kwargs: Any) -> None:
+        target_state = self._target_state(target)
+        if target_state is not None:
+            await self.scene.stack.push(target_state)
         await self.scene.wizard.goto(target, **kwargs)
+
+    async def back_to(self, target: type[Scene] | str, **kwargs: Any) -> None:
+        target_state = self._target_state(target)
+        if target_state is None:
+            await self.replace(target, sync_stack=False, **kwargs)
+            return
+
+        await self.scene.stack.pop()
+        current = await self.scene.stack.current()
+        if current != target_state:
+            if current is None:
+                await self.scene.stack.reset(target_state)
+            else:
+                await self.scene.stack.replace_current(target_state)
+        await self.scene.history.pop()
+        await self.replace(target, sync_stack=False, **kwargs)
 
     async def replace(
         self,
         target: type[Scene] | str,
         *,
         reset_history: bool = False,
+        sync_stack: bool = True,
         **kwargs: Any,
     ) -> None:
         manager = getattr(self.scene.wizard, "manager", None)
         history = getattr(manager, "history", None)
+        target_state = self._target_state(target)
 
         if history is not None and reset_history and hasattr(history, "clear"):
             await history.clear()
+        if reset_history:
+            await self.scene.history.clear()
+
+        if sync_stack and target_state is not None:
+            if reset_history:
+                await self.scene.stack.reset(target_state)
+            else:
+                await self.scene.stack.replace_current(target_state)
 
         await self.scene.wizard.leave(_with_history=False, **kwargs)
         if manager is None or not hasattr(manager, "enter"):
@@ -159,8 +197,16 @@ class SceneNavigator:
             if target == BACK_TARGET_HOME:
                 await self.home(**kwargs)
                 return
-            await self.to(str(target), **kwargs)
+            await self.back_to(str(target), **kwargs)
             return
+
+        target_state = await self.scene.stack.back_target(self.scene.state_id)
+        if target_state is not None:
+            await self.scene.stack.pop()
+            await self.scene.history.pop()
+            await self.replace(target_state, sync_stack=False, **kwargs)
+            return
+
         await self.scene.history.pop()
         await self.scene.wizard.back(**kwargs)
 
@@ -168,6 +214,8 @@ class SceneNavigator:
         await self.scene.wizard.retake(**kwargs)
 
     async def exit(self, **kwargs: Any) -> None:
+        await self.scene.stack.pop()
+        await self.scene.history.pop()
         await self.scene.wizard.exit(**kwargs)
 
     async def home(self, **kwargs: Any) -> None:
@@ -189,13 +237,17 @@ class SceneNavigator:
         await self.exit(**kwargs)
 
     async def stack_states(self) -> list[str]:
+        states = await self.scene.stack.states()
+        if states:
+            return states
+
         manager = getattr(self.scene.wizard, "manager", None)
         history = getattr(manager, "history", None)
         if history is None or not hasattr(history, "all"):
             return []
 
         records = await history.all()
-        states: list[str] = []
+        states = []
         for record in records:
             state = getattr(record, "state", None)
             if isinstance(state, str):
@@ -240,6 +292,7 @@ class AppScene(Scene, reset_history_on_enter=False):
         self.data = SceneDataProxy(wizard)
         self.services = SceneServicesProxy(self)
         self.history = SceneHistoryProxy(self.data)
+        self.stack = SceneStackProxy(self.data)
         self.nav = SceneNavigator(self)
 
     @property
@@ -359,6 +412,7 @@ class AppScene(Scene, reset_history_on_enter=False):
         breadcrumb_label: str | None = None,
         **kwargs: Any,
     ) -> Any:
+        await self.stack.ensure(self.state_id)
         payload = render_text(content, replace_parse_mode=replace_parse_mode)
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
@@ -482,7 +536,7 @@ class AppScene(Scene, reset_history_on_enter=False):
     async def _navigate_back(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
         if callback_data.target:
-            await self.nav.to(callback_data.target)
+            await self.nav.back_to(callback_data.target)
             return
         await self.nav.back()
 
