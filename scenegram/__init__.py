@@ -1,5 +1,12 @@
 from .background import BroadcastResult, BroadcastScene, broadcast_module
-from .base import BACK_TARGET_HOME, AppScene, SceneDataProxy, SceneNavigator, SceneServicesProxy
+from .base import (
+    BACK_TARGET_HOME,
+    AppScene,
+    SceneContextProxy,
+    SceneDataProxy,
+    SceneNavigator,
+    SceneServicesProxy,
+)
 from .bootstrap import (
     EntryPoint,
     SceneBootstrapResult,
@@ -152,6 +159,7 @@ __all__ = [
     "SceneActionConfig",
     "SceneBootstrapResult",
     "SceneCleanup",
+    "SceneContextProxy",
     "SceneDataProxy",
     "SceneDeepLinksProxy",
     "SceneDescriptor",

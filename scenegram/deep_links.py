@@ -702,11 +702,27 @@ class DeepLinkManager:
         if route.handler is None:
             return None
         callback = route.handler
+        call_args: tuple[Any, ...]
         if isinstance(callback, str):
             if self.scene_instance is None:
                 raise RuntimeError("String deep link handlers require a scene instance")
             callback = getattr(self.scene_instance, callback)
-        return await call_with_optional_args(callback, self.scene_instance, event, context)
+            call_args = (event, context)
+        elif (
+            self.scene_instance is not None
+            and getattr(callback, "__self__", None) is self.scene_instance
+        ):
+            call_args = (event, context)
+        else:
+            call_args = (self.scene_instance, event, context)
+        context_kwargs = {}
+        if self.scene_instance is not None:
+            context_kwargs = self.scene_instance.context_data()
+        return await call_with_optional_args(
+            callback,
+            *call_args,
+            **context_kwargs,
+        )
 
     async def _invoke_route_parser(
         self,
@@ -717,11 +733,27 @@ class DeepLinkManager:
         if route.parser is None:
             return context.payload
         callback = route.parser
+        call_args: tuple[Any, ...]
         if isinstance(callback, str):
             if self.scene_instance is None:
                 raise RuntimeError("String deep link parsers require a scene instance")
             callback = getattr(self.scene_instance, callback)
-        return await call_with_optional_args(callback, self.scene_instance, event, context)
+            call_args = (event, context)
+        elif (
+            self.scene_instance is not None
+            and getattr(callback, "__self__", None) is self.scene_instance
+        ):
+            call_args = (event, context)
+        else:
+            call_args = (self.scene_instance, event, context)
+        context_kwargs = {}
+        if self.scene_instance is not None:
+            context_kwargs = self.scene_instance.context_data()
+        return await call_with_optional_args(
+            callback,
+            *call_args,
+            **context_kwargs,
+        )
 
     async def _ensure_roles(self, event: Message, roles: Iterable[str]) -> None:
         allowed = normalize_roles(roles)
@@ -907,7 +939,15 @@ class _DeepLinkEntrySupport:
             text = self.deep_link_invalid_text
 
         await cast(Any, self).reply_notice(message, text)
-        return await self.on_plain_start(message, command)
+        context_kwargs = {}
+        if hasattr(self, "context_data"):
+            context_kwargs = cast(Any, self).context_data()
+        return await call_with_optional_args(
+            self.on_plain_start,
+            message,
+            command,
+            **context_kwargs,
+        )
 
     async def handle_start_entry(
         self,
@@ -915,7 +955,15 @@ class _DeepLinkEntrySupport:
         command: CommandObject | None = None,
     ) -> Any:
         if not command or not command.args:
-            return await self.on_plain_start(message, command)
+            context_kwargs = {}
+            if hasattr(self, "context_data"):
+                context_kwargs = cast(Any, self).context_data()
+            return await call_with_optional_args(
+                self.on_plain_start,
+                message,
+                command,
+                **context_kwargs,
+            )
         try:
             proxy = cast(Any, self).deep_links
             return await proxy.dispatch(message, command)

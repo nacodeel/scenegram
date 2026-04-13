@@ -24,6 +24,7 @@ from scenegram import (
     StepScene,
     reply_menu,
 )
+from scenegram._utils import call_with_optional_args
 from scenegram.formatting import Bold, Text
 from scenegram.runtime import RUNTIME
 
@@ -44,6 +45,13 @@ class DemoMenuScene(MenuScene, state="tests.menu"):
     navigation_back = True
     navigation_home = True
     navigation_home_target = "tests.demo"
+
+
+class ContextMenuScene(MenuScene, state="tests.menu.context"):
+    __abstract__ = False
+
+    async def menu_content(self, event, user) -> str:
+        return f"Menu for {user.username}"
 
 
 class DemoConfirmScene(ConfirmScene, state="tests.confirm"):
@@ -127,6 +135,29 @@ async def test_show_supports_aiogram_formatting_entities(wizard) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scene_context_proxy_reads_runtime_context(wizard) -> None:
+    scene = DemoScene(wizard)
+    user = SimpleNamespace(id=7, username="alice")
+    wizard.manager.data = {"user": user}
+
+    assert scene.context.get("user") is user
+    assert scene.context.require("user") is user
+
+
+@pytest.mark.asyncio
+async def test_call_with_optional_args_injects_named_kwargs() -> None:
+    async def callback(message, user=None):
+        return message, user.username if user else None
+
+    message = object()
+    user = SimpleNamespace(username="alice")
+
+    result = await call_with_optional_args(callback, message, user=user, ignored=True)
+
+    assert result == (message, "alice")
+
+
+@pytest.mark.asyncio
 async def test_show_falls_back_to_answer_when_edit_fails(wizard, monkeypatch) -> None:
     from tests.conftest import FakeCallbackQuery, FakeMessage
 
@@ -203,6 +234,19 @@ async def test_menu_scene_combines_static_rows_and_navigation(wizard) -> None:
     assert markup.inline_keyboard[0][0].text == "Open"
     assert markup.inline_keyboard[1][0].callback_data == Navigate.back().pack()
     assert markup.inline_keyboard[1][1].callback_data == Navigate.home("tests.demo").pack()
+
+
+@pytest.mark.asyncio
+async def test_menu_scene_injects_context_kwargs_into_hooks(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = ContextMenuScene(wizard)
+    wizard.manager.data = {"user": SimpleNamespace(username="alice")}
+    message = FakeMessage()
+
+    await scene.render_menu(message)
+
+    assert message.answer_calls[-1]["text"] == "Menu for alice"
 
 
 @pytest.mark.asyncio

@@ -74,8 +74,10 @@ class MenuScene(AppScene):
         return RUNTIME.menu_entries_for(state)
 
     async def menu_markup(self, event: Message | CallbackQuery):
-        rows = await self.menu_rows(event)
-        rows.extend(await self.contributed_rows(event))
+        rows = await self.run_operation("menu_rows", event, self.menu_rows, event)
+        rows.extend(
+            await self.run_operation("contributed_rows", event, self.contributed_rows, event)
+        )
         navigation = nav_row(
             back=self.navigation_back,
             home=self.navigation_home,
@@ -89,8 +91,8 @@ class MenuScene(AppScene):
     async def render_menu(self, event: Message | CallbackQuery) -> Any:
         return await self.show(
             event,
-            await self.menu_content(event),
-            reply_markup=await self.menu_markup(event),
+            await self.run_operation("menu_content", event, self.menu_content, event),
+            reply_markup=await self.run_operation("menu_markup", event, self.menu_markup, event),
         )
 
     @on.message.enter()
@@ -129,8 +131,20 @@ class DeepLinkScene(_DeepLinkEntrySupport, AppScene):
     ) -> Any:
         return await self.show(
             message,
-            await self.start_content(message, command),
-            reply_markup=await self.start_markup(message, command),
+            await self.run_operation(
+                "start_content",
+                message,
+                self.start_content,
+                message,
+                command,
+            ),
+            reply_markup=await self.run_operation(
+                "start_markup",
+                message,
+                self.start_markup,
+                message,
+                command,
+            ),
         )
 
     @on.message.enter()
@@ -186,8 +200,10 @@ class ConfirmScene(AppScene):
     async def render_confirm(self, event: Message | CallbackQuery) -> Any:
         return await self.show(
             event,
-            await self.confirm_content(event),
-            reply_markup=inline_menu(await self.confirm_rows(event)),
+            await self.run_operation("confirm_content", event, self.confirm_content, event),
+            reply_markup=inline_menu(
+                await self.run_operation("confirm_rows", event, self.confirm_rows, event)
+            ),
         )
 
     async def on_confirm(self, event: CallbackQuery) -> Any:
@@ -298,7 +314,13 @@ class StepScene(AppScene):
         event: Message | CallbackQuery,
     ) -> list[list[ReplyButton]]:
         rows = [list(row) for row in self.reply_rows]
-        step_navigation = await self.step_reply_navigation_row(step_name, event)
+        step_navigation = await self.run_operation(
+            "step_reply_navigation_row",
+            event,
+            self.step_reply_navigation_row,
+            step_name,
+            event,
+        )
         if step_navigation:
             rows.append(step_navigation)
         navigation = reply_nav_row(
@@ -322,11 +344,29 @@ class StepScene(AppScene):
             return []
 
         buttons: list[ReplyButton] = []
-        if await self.allow_step_previous(step_name, event):
+        if await self.run_operation(
+            "allow_step_previous",
+            event,
+            self.allow_step_previous,
+            step_name,
+            event,
+        ):
             buttons.append(ReplyButton(text=self.step_previous_text))
-        if await self.allow_step_next(step_name, event):
+        if await self.run_operation(
+            "allow_step_next",
+            event,
+            self.allow_step_next,
+            step_name,
+            event,
+        ):
             buttons.append(ReplyButton(text=self.step_next_text))
-        if await self.allow_step_skip(step_name, event):
+        if await self.run_operation(
+            "allow_step_skip",
+            event,
+            self.allow_step_skip,
+            step_name,
+            event,
+        ):
             buttons.append(ReplyButton(text=self.step_skip_text))
         return buttons
 
@@ -337,7 +377,13 @@ class StepScene(AppScene):
     ) -> Any | None:
         if not self.use_reply_keyboard:
             return None
-        rows = await self.reply_rows_for(step_name, event)
+        rows = await self.run_operation(
+            "reply_rows_for",
+            event,
+            self.reply_rows_for,
+            step_name,
+            event,
+        )
         if not rows:
             return None
         return reply_menu(rows, resize_keyboard=self.reply_resize_keyboard)
@@ -356,7 +402,13 @@ class StepScene(AppScene):
     ) -> Any:
         resolved_markup = reply_markup
         if reply_markup is AUTO_REPLY_MARKUP:
-            resolved_markup = await self.reply_markup_for(await self.current_step(), event)
+            resolved_markup = await self.run_operation(
+                "reply_markup_for",
+                event,
+                self.reply_markup_for,
+                await self.current_step(),
+                event,
+            )
 
         return await super().show(
             event,
@@ -382,7 +434,12 @@ class StepScene(AppScene):
 
     async def go_to_step(self, event: Message | CallbackQuery, step_name: str) -> Any:
         await self.set_step(step_name)
-        return await self.render_current_step(event)
+        return await self.run_operation(
+            "render_current_step",
+            event,
+            self.render_current_step,
+            event,
+        )
 
     async def render_current_step(self, event: Message | CallbackQuery) -> Any:
         step_name = await self.current_step()
@@ -400,7 +457,12 @@ class StepScene(AppScene):
 
         next_step_name = steps[index + 1]
         await self.set_step(next_step_name)
-        return await self.render_current_step(event)
+        return await self.run_operation(
+            "render_current_step",
+            event,
+            self.render_current_step,
+            event,
+        )
 
     async def prev_step(self, event: Message | CallbackQuery, **data: Any) -> Any:
         steps = self.declared_steps()
@@ -413,7 +475,12 @@ class StepScene(AppScene):
 
         previous_step_name = steps[index - 1]
         await self.set_step(previous_step_name)
-        return await self.render_current_step(event)
+        return await self.run_operation(
+            "render_current_step",
+            event,
+            self.render_current_step,
+            event,
+        )
 
     async def skip_step(self, event: Message | CallbackQuery, **data: Any) -> Any:
         return await self.next_step(event, **data)
@@ -497,18 +564,45 @@ class StepScene(AppScene):
             return True
 
         step_name = await self.current_step()
-        step_action = await self.step_navigation_action(step_name, message.text, message)
+        step_action = await self.run_operation(
+            "step_navigation_action",
+            message,
+            self.step_navigation_action,
+            step_name,
+            message.text,
+            message,
+        )
         if step_action == "back":
-            await self.request_step_previous(message)
+            await self.run_operation(
+                "request_step_previous",
+                message,
+                self.request_step_previous,
+                message,
+            )
             return True
         if step_action == "next":
-            await self.request_step_next(message)
+            await self.run_operation(
+                "request_step_next",
+                message,
+                self.request_step_next,
+                message,
+            )
             return True
         if step_action == "skip":
-            await self.request_step_skip(message)
+            await self.run_operation(
+                "request_step_skip",
+                message,
+                self.request_step_skip,
+                message,
+            )
             return True
 
-        action = await self.reply_navigation_action(message.text)
+        action = await self.run_operation(
+            "reply_navigation_action",
+            message,
+            self.reply_navigation_action,
+            message.text,
+        )
         if action == "cancel":
             await self._cancel_text(message)
             return True
@@ -525,19 +619,19 @@ class StepScene(AppScene):
         return await self.data.update({self.step_storage_key(step_name): message.text})
 
     async def handle_step_input(self, message: Message, step_name: str) -> None:
-        await self.save_step_input(message)
+        await self.run_operation("save_step_input", message, self.save_step_input, message)
         await self.next_step(message)
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message) -> None:
         await self.set_step(await self.current_step())
-        await self.render_current_step(message)
+        await self.run_operation("render_current_step", message, self.render_current_step, message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery) -> None:
         await call.answer()
         await self.set_step(await self.current_step())
-        await self.render_current_step(call)
+        await self.run_operation("render_current_step", call, self.render_current_step, call)
 
     @on.message(F.text)
     async def _on_step_input(self, message: Message) -> None:
@@ -553,7 +647,13 @@ class StepScene(AppScene):
             await self.cleanup_user_message(message)
             return
 
-        await self.handle_step_input(message, step_name)
+        await self.run_operation(
+            "handle_step_input",
+            message,
+            self.handle_step_input,
+            message,
+            step_name,
+        )
         await self.cleanup_user_message(message)
 
     @on.message()
@@ -564,17 +664,17 @@ class StepScene(AppScene):
     @on.callback_query(StepAction.filter(F.action == "next"))
     async def _next_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.request_step_next(call)
+        await self.run_operation("request_step_next", call, self.request_step_next, call)
 
     @on.callback_query(StepAction.filter(F.action == "back"))
     async def _back_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.request_step_previous(call)
+        await self.run_operation("request_step_previous", call, self.request_step_previous, call)
 
     @on.callback_query(StepAction.filter(F.action == "skip"))
     async def _skip_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.request_step_skip(call)
+        await self.run_operation("request_step_skip", call, self.request_step_skip, call)
 
     @on.callback_query(StepAction.filter(F.action == "exit"))
     async def _exit_action(self, call: CallbackQuery) -> None:
@@ -667,15 +767,15 @@ class FormScene(StepScene):
             )
 
         field = self.field_by_step(step_name)
-        markup = await self.field_markup(field, event)
+        markup = await self.run_operation("field_markup", event, self.field_markup, field, event)
         if markup is None:
             return await self.show(
                 event,
-                await self.field_content(field, event),
+                await self.run_operation("field_content", event, self.field_content, field, event),
             )
         return await self.show(
             event,
-            await self.field_content(field, event),
+            await self.run_operation("field_content", event, self.field_content, field, event),
             reply_markup=markup,
         )
 
@@ -790,8 +890,10 @@ class FormScene(StepScene):
     async def render_confirmation(self, event: Message | CallbackQuery) -> Any:
         return await self.show(
             event,
-            await self.confirm_content(event),
-            reply_markup=inline_menu(await self.confirm_rows(event)),
+            await self.run_operation("confirm_content", event, self.confirm_content, event),
+            reply_markup=inline_menu(
+                await self.run_operation("confirm_rows", event, self.confirm_rows, event)
+            ),
         )
 
     async def submit_form(self, event: Message | CallbackQuery) -> Any:
@@ -833,7 +935,13 @@ class FormScene(StepScene):
             return await self.next_step(event)
         return await self.show(
             event,
-            await self.field_error_content(field, self.missing_required_value_text),
+            await self.run_operation(
+                "field_error_content",
+                event,
+                self.field_error_content,
+                field,
+                self.missing_required_value_text,
+            ),
         )
 
     async def request_step_skip(self, event: Message | CallbackQuery) -> Any:
@@ -842,7 +950,13 @@ class FormScene(StepScene):
         if not self.field_is_skippable(field):
             return await self.show(
                 event,
-                await self.field_error_content(field, self.missing_required_value_text),
+                await self.run_operation(
+                    "field_error_content",
+                    event,
+                    self.field_error_content,
+                    field,
+                    self.missing_required_value_text,
+                ),
             )
         await self.data.update({self.field_data_key(field): None})
         return await self.next_step(event)
@@ -853,12 +967,30 @@ class FormScene(StepScene):
         try:
             value = await self.parse_field_value(field, message.text or "", message)
         except ValueError as exc:
-            await self.show(message, await self.field_error_content(field, str(exc)))
+            await self.show(
+                message,
+                await self.run_operation(
+                    "field_error_content",
+                    message,
+                    self.field_error_content,
+                    field,
+                    str(exc),
+                ),
+            )
             return
 
         error = await self.validate_field_value(field, value, message)
         if error:
-            await self.show(message, await self.field_error_content(field, error))
+            await self.show(
+                message,
+                await self.run_operation(
+                    "field_error_content",
+                    message,
+                    self.field_error_content,
+                    field,
+                    error,
+                ),
+            )
             return
 
         await self.data.update({self.field_data_key(field): value})

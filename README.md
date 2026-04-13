@@ -284,6 +284,43 @@ create_scenes_router(
 - security middleware, который оборачивает `data["scenes"]` в secure manager proxy;
 - error middleware, который эмитит runtime event на необработанные ошибки scene-layer.
 
+Middleware data при этом не теряется внутри framework-level hooks.
+
+Если middleware кладёт объект в `data`, например:
+
+```python
+data["user"] = user
+```
+
+то scenegram поддерживает два способа доступа:
+
+- именованный параметр в scene hook, который framework вызывает сам;
+- запасной доступ через `self.context`.
+
+Пример:
+
+```python
+class SurveyScene(FormScene, state="survey.start"):
+    __abstract__ = False
+
+    async def field_content(self, field, event, user):
+        return f"{user.username}: {field.prompt}"
+
+    async def on_form_submit(self, event, result):
+        user = self.context.require("user")
+        await self.services.call("audit_logger", f"submit by {user.id}")
+```
+
+Это работает не только для aiogram handlers, но и для scenegram hooks вроде:
+
+- `menu_content(...)`
+- `start_content(...)`
+- `confirm_content(...)`
+- `field_content(...)`
+- `validator/parser/formatter`
+- `on_form_submit(...)`
+- built-in CRUD/deep-link callbacks
+
 ### 6. Reply keyboard на шагах ввода
 
 `StepScene` и `FormScene` теперь умеют автоматически показывать standard reply keyboard на шагах, где у пользователя нет inline-кнопок.

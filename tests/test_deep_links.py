@@ -13,6 +13,7 @@ from scenegram import (
     DeepLinkSignatureError,
     InMemoryDeepLinkStore,
     create_scenes_router,
+    deep_link_handler,
     deep_link_scene,
 )
 from scenegram.runtime import RUNTIME
@@ -45,6 +46,20 @@ class ProductStartScene(DeepLinkMenuScene, state="product.start"):
             back_target="catalog.list",
         ),
     )
+
+
+class ContextStartScene(DeepLinkMenuScene, state="context.start"):
+    __abstract__ = False
+    menu_text = "Context start"
+
+    def __init__(self, wizard):
+        super().__init__(wizard)
+        self.deep_link_user = None
+
+    async def open_with_user(self, event, context, user) -> None:
+        self.deep_link_user = user
+
+    deep_links = (deep_link_handler("context.open", "open_with_user"),)
 
 
 class DummyTargetScene(AppScene, state="catalog.detail"):
@@ -152,3 +167,25 @@ def test_create_scenes_router_registers_deep_link_routes() -> None:
 
     assert set(RUNTIME.deep_link_routes) == {"fixture.module", "fixture.scene"}
     assert RUNTIME.deep_link_routes["fixture.scene"].scene == "deep.target"
+
+
+@pytest.mark.asyncio
+async def test_deep_link_handler_injects_context_kwargs(wizard) -> None:
+    RUNTIME.deep_link_store = InMemoryDeepLinkStore()
+    RUNTIME.register_deep_link_routes(ContextStartScene.deep_links)
+
+    scene = ContextStartScene(wizard)
+    wizard.manager.data = {"user": SimpleNamespace(id=100, username="alice")}
+    message = FakeMessage(bot=DeepLinkBot(), text="/start")
+    message.from_user = SimpleNamespace(id=100)
+
+    link = await scene.deep_links.create(
+        "context.open",
+        {"ok": True},
+        bot=DeepLinkBot(),
+        secure=False,
+    )
+
+    await scene.deep_links.dispatch(message, extract_start_arg(link))
+
+    assert scene.deep_link_user.username == "alice"

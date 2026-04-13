@@ -77,6 +77,7 @@
 - не хардкодить infra adapters под один стек;
 - новые packs должны быть самодостаточными и переносимыми;
 - scene-level middlewares должны объявляться через typed bindings, а не через ручную регистрацию снаружи;
+- middleware/update context должен быть доступен и в aiogram handlers, и во framework-level scene hooks через именованные параметры или `self.context`;
 - любой новый runtime hook обязан иметь тесты;
 - при значимых изменениях обновлять этот README и корневой README.
 

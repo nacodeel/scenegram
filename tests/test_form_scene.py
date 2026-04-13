@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -92,6 +93,33 @@ class CarouselFormScene(FormScene, state="tests.form.carousel"):
         return None
 
 
+class InjectedFormScene(FormScene, state="tests.form.injected"):
+    __abstract__ = False
+    fields = (
+        FormField(
+            name="email",
+            prompt="Какой e-mail использовать?",
+            validator="validate_email",
+        ),
+    )
+
+    def __init__(self, wizard):
+        super().__init__(wizard)
+        self.seen_user = None
+
+    async def field_content(self, field, event) -> str:
+        user = self.context.require("user")
+        return f"{user.username}: {field.prompt}"
+
+    async def validate_email(self, value: str, user) -> str | None:
+        if value == user.email:
+            return None
+        return "Нужен e-mail из middleware context."
+
+    async def on_form_submit(self, event, result, user) -> None:
+        self.seen_user = user
+
+
 def test_form_scene_declares_generated_steps() -> None:
     assert DemoFormScene.declared_steps() == ("field__age", "field__email", "__confirm__")
 
@@ -141,6 +169,38 @@ async def test_form_scene_validation_error_keeps_current_step(wizard) -> None:
     assert wizard.data.get("_step") is None
     assert "Возраст должен быть не меньше 18." in message.answer_calls[-1]["text"]
     assert message.answer_calls[-1]["reply_markup"].keyboard[0][0].text == "Отмена"
+
+
+@pytest.mark.asyncio
+async def test_form_scene_injects_context_into_render_and_validation_hooks(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = InjectedFormScene(wizard)
+    wizard.manager.data = {"user": SimpleNamespace(username="alice", email="alice@example.com")}
+    enter_message = FakeMessage()
+
+    await scene._on_message_enter(enter_message)
+
+    assert enter_message.answer_calls[-1]["text"] == "alice: Какой e-mail использовать?"
+
+    invalid_message = FakeMessage(text="other@example.com")
+    await scene._on_step_input(invalid_message)
+
+    assert "Нужен e-mail из middleware context." in invalid_message.answer_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_form_scene_injects_context_into_submit_hook(wizard) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    wizard.data = {"email": "alice@example.com"}
+    wizard.manager.data = {"user": SimpleNamespace(username="alice", email="alice@example.com")}
+    scene = InjectedFormScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene.submit_form(call)
+
+    assert scene.seen_user.username == "alice"
 
 
 @pytest.mark.asyncio

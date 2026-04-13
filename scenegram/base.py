@@ -197,6 +197,23 @@ class SceneServicesProxy:
         raise TypeError(f"Service '{key}' is not callable")
 
 
+class SceneContextProxy:
+    def __init__(self, scene: AppScene) -> None:
+        self.scene = scene
+
+    def all(self) -> dict[str, Any]:
+        return self.scene.context_data()
+
+    def get(self, key: str, default: Any | None = None) -> Any:
+        return self.scene.context_data().get(key, default)
+
+    def require(self, key: str) -> Any:
+        value = self.get(key)
+        if value is None:
+            raise KeyError(f"Missing required scene context key: {key}")
+        return value
+
+
 class SceneNavigator:
     def __init__(self, scene: AppScene) -> None:
         self.scene = scene
@@ -421,6 +438,7 @@ class AppScene(Scene, reset_history_on_enter=False):
             else:
                 wizard.manager = SecureScenesManagerProxy(manager, scene=self)
         self.data = SceneDataProxy(wizard)
+        self.context = SceneContextProxy(self)
         self.services = SceneServicesProxy(self)
         self.history = SceneHistoryProxy(self.data)
         self.stack = SceneStackProxy(self.data)
@@ -445,6 +463,17 @@ class AppScene(Scene, reset_history_on_enter=False):
     def current_event(self) -> Any | None:
         manager = getattr(self.wizard, "manager", None)
         return getattr(manager, "event", None)
+
+    def context_data(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        manager = getattr(self.wizard, "manager", None)
+        manager_data = getattr(manager, "data", None)
+        if isinstance(manager_data, Mapping):
+            payload.update(manager_data)
+        wizard_data = getattr(self.wizard, "data", None)
+        if isinstance(wizard_data, Mapping):
+            payload.update(wizard_data)
+        return payload
 
     async def current_roles(self, event: Any | None = None) -> set[str]:
         return await resolve_event_roles(event or self.current_event())
@@ -543,7 +572,11 @@ class AppScene(Scene, reset_history_on_enter=False):
         )
         try:
             async with self.chat_action(event, config):
-                result = await call_with_optional_args(callback, *args)
+                result = await call_with_optional_args(
+                    callback,
+                    *args,
+                    **self.context_data(),
+                )
         except Exception as exc:
             await self.runtime.emit(
                 "scene.operation.error",
@@ -609,7 +642,14 @@ class AppScene(Scene, reset_history_on_enter=False):
         if remember_history:
             await self.history.replace_current(
                 self.state_id,
-                breadcrumb_label or await self.breadcrumb_label(event, content),
+                breadcrumb_label
+                or await self.run_operation(
+                    "breadcrumb_label",
+                    event,
+                    self.breadcrumb_label,
+                    event,
+                    content,
+                ),
             )
         await self.runtime.emit(
             "scene.render",

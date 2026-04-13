@@ -58,13 +58,20 @@ class CrudListScene(AppScene):
             self.page_size,
         )
         await self.remember_page(crud_page.page)
-        rows = self.build_item_rows(crud_page.items)
+        rows = await self.run_operation(
+            "build_item_rows",
+            event,
+            self.build_item_rows,
+            crud_page.items,
+        )
 
         if not rows:
             rows = []
 
-        rows.extend(self.pagination_rows(crud_page))
-        content = await self.page_content(crud_page)
+        rows.extend(
+            await self.run_operation("pagination_rows", event, self.pagination_rows, crud_page)
+        )
+        content = await self.run_operation("page_content", event, self.page_content, crud_page)
         return await self.show(event, content, reply_markup=inline_menu(rows))
 
     async def page_content(self, page: CrudPage) -> Any:
@@ -232,8 +239,10 @@ class CrudDetailScene(AppScene):
         item_id = await self.current_item_id()
         return await self.show(
             event,
-            await self.detail_content(event, item),
-            reply_markup=inline_menu(await self.detail_rows(item_id)),
+            await self.run_operation("detail_content", event, self.detail_content, event, item),
+            reply_markup=inline_menu(
+                await self.run_operation("detail_rows", event, self.detail_rows, item_id)
+            ),
         )
 
     @on.message.enter()
@@ -349,7 +358,7 @@ class CrudDeleteScene(ConfirmScene):
             return
         await self.run_operation("delete_item", event, adapter.delete_item, self, item)
         await event.answer(self.success_notice)
-        await self.after_delete(event, item)
+        await self.run_operation("after_delete", event, self.after_delete, event, item)
         if self.list_scene:
             back_target = await self.nav.previous_before(self.list_scene)
             await self.data.update(_back_target=back_target or BACK_TARGET_HOME)
