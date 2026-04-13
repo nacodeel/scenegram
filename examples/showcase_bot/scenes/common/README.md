@@ -18,7 +18,7 @@
 - menu hub;
 - pagination flow;
 - confirm flow;
-- cleanup-aware onboarding form с auto reply-кнопкой `Отмена`;
+- cleanup-aware onboarding form с auto reply-кнопкой `Отмена` и question-level step carousel;
 - использование глобальных сервисов контейнера.
 
 ## Ограничения

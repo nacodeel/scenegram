@@ -145,8 +145,8 @@ create_scenes_router(
 
 - на input screen появляется reply-кнопка `Отмена`;
 - кнопка ловится built-in handler-ом сцены;
-- на cancel framework отправляет `message.reply("Отменено", reply_markup=ReplyKeyboardRemove())`;
-- после этого делает `nav.home()`.
+- на cancel framework отправляет `message.answer(..., reply_markup=ReplyKeyboardRemove())`;
+- после этого делает `nav.cancel()` к `home_scene` текущей сцены, не ломая родительский scene stack.
 
 Можно настраивать:
 
@@ -167,6 +167,50 @@ class SurveyScene(FormScene, state="survey.start"):
 ```
 
 Если scene-level prompt должен полностью отключить auto reply keyboard, можно передать `reply_markup=None` в `self.show(...)` или выставить `use_reply_keyboard = False`.
+
+### 6.1. Карусель вопросов внутри формы
+
+`FormScene` умеет работать в двух режимах:
+
+- строгая форма: пользователь обязан отвечать последовательно, шаги переключаются только после ввода;
+- carousel-форма: сцена показывает кнопки `Предыдущий вопрос` / `Следующий вопрос` / `Пропустить`, и пользователь может перелистывать уже заполненные поля.
+
+Включается это на уровне конкретной сцены:
+
+```python
+from scenegram import FormField, FormScene
+
+
+class SurveyScene(FormScene, state="survey.start"):
+    __abstract__ = False
+    home_scene = "common.start"
+    step_pagination = True
+    use_confirm_step = True
+    fields = (
+        FormField(name="name", prompt="Как вас зовут?"),
+        FormField(
+            name="telegram",
+            prompt="Какой Telegram указать для связи?",
+            required=False,
+        ),
+        FormField(name="email", prompt="Какой e-mail использовать?"),
+    )
+```
+
+Правила:
+
+- `edit` из confirm screen по умолчанию возвращает на первый вопрос;
+- `step_pagination = True` добавляет question-level navigation в reply keyboard;
+- `required=False` делает поле пропускаемым;
+- если поле обязательное и ещё не заполнено, `Следующий вопрос` не перелистнёт форму молча.
+
+Если нужно старое поведение с возвратом к последнему вопросу, можно явно задать:
+
+```python
+class LegacyEditScene(FormScene, state="legacy.edit"):
+    __abstract__ = False
+    edit_restart_from = "last"
+```
 
 ### 7. Chat actions
 
@@ -354,6 +398,7 @@ class OnboardingScene(FormScene, state="common.onboarding"):
     home_scene = "common.start"
     cleanup = SceneCleanup(delete_previous_screen=True, delete_user_messages=True)
     result_model = OnboardingResult
+    step_pagination = True
     use_confirm_step = True
     fields = (
         FormField(name="name", prompt="Как вас зовут?"),

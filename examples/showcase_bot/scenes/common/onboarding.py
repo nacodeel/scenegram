@@ -19,6 +19,7 @@ class OnboardingScene(FormScene, state="common.onboarding"):
     home_scene = "common.start"
     cleanup = SceneCleanup(delete_previous_screen=True, delete_user_messages=True)
     result_model = OnboardingResult
+    step_pagination = True
     use_confirm_step = True
     fields = (
         FormField(name="name", prompt="Как вас зовут?", summary_label="Name"),

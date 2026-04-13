@@ -61,17 +61,54 @@ class CustomReplyFormScene(DemoFormScene, state="tests.form.reply"):
     reply_rows = ((ReplyButton(text="Помощь"),),)
 
 
+class LastEditFormScene(DemoFormScene, state="tests.form.last-edit"):
+    __abstract__ = False
+    edit_restart_from = "last"
+
+
+class CarouselFormScene(FormScene, state="tests.form.carousel"):
+    __abstract__ = False
+    step_pagination = True
+    use_confirm_step = True
+    fields = (
+        FormField(name="name", prompt="Как вас зовут?", summary_label="Name"),
+        FormField(
+            name="nickname",
+            prompt="Как вас называть в интерфейсе?",
+            summary_label="Nickname",
+            required=False,
+        ),
+        FormField(
+            name="email",
+            prompt="Какой e-mail использовать?",
+            validator="validate_email",
+            summary_label="Email",
+        ),
+    )
+
+    async def validate_email(self, value: str) -> str | None:
+        if "@" not in value:
+            return "Нужен корректный e-mail."
+        return None
+
+
 def test_form_scene_declares_generated_steps() -> None:
     assert DemoFormScene.declared_steps() == ("field__age", "field__email", "__confirm__")
 
 
 def test_step_nav_row_builds_requested_actions() -> None:
-    buttons = step_nav_row(next_step=True, back=True, exit_scene=True)
+    buttons = step_nav_row(next_step=True, skip_step=True, back=True, exit_scene=True)
 
-    assert [button.text for button in buttons] == ["⬅️ Предыдущий шаг", "➡️ Дальше", "✖️ Выйти"]
+    assert [button.text for button in buttons] == [
+        "⬅️ Предыдущий шаг",
+        "➡️ Дальше",
+        "⏭️ Пропустить",
+        "✖️ Выйти",
+    ]
     assert buttons[0].callback_data == StepAction(action="back")
     assert buttons[1].callback_data == StepAction(action="next")
-    assert buttons[2].callback_data == StepAction(action="exit")
+    assert buttons[2].callback_data == StepAction(action="skip")
+    assert buttons[3].callback_data == StepAction(action="exit")
 
 
 @pytest.mark.asyncio
@@ -192,7 +229,9 @@ async def test_form_scene_submit_action_builds_typed_result(wizard) -> None:
 
 
 @pytest.mark.asyncio
-async def test_form_scene_edit_action_returns_to_last_field(wizard, monkeypatch) -> None:
+async def test_form_scene_edit_action_returns_to_first_field_by_default(
+    wizard, monkeypatch
+) -> None:
     from tests.conftest import FakeCallbackQuery
 
     monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
@@ -202,8 +241,23 @@ async def test_form_scene_edit_action_returns_to_last_field(wizard, monkeypatch)
 
     await scene._edit_action(call)
 
-    assert wizard.data["_step"] == "field__email"
+    assert wizard.data["_step"] == "field__age"
     assert call.message.edit_calls == []
+    assert "Шаг 1/2" in call.message.answer_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_form_scene_edit_action_can_restart_from_last_field(wizard, monkeypatch) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    wizard.data = {"_step": "__confirm__", "age": 25, "email": "user@example.com"}
+    scene = LastEditFormScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._edit_action(call)
+
+    assert wizard.data["_step"] == "field__email"
     assert "Шаг 2/2" in call.message.answer_calls[-1]["text"]
 
 
@@ -229,3 +283,74 @@ async def test_form_scene_supports_custom_reply_rows_before_cancel(wizard) -> No
     markup = message.answer_calls[-1]["reply_markup"]
     assert [button.text for button in markup.keyboard[0]] == ["Помощь"]
     assert [button.text for button in markup.keyboard[1]] == ["Отмена"]
+
+
+@pytest.mark.asyncio
+async def test_carousel_form_scene_reply_keyboard_includes_step_navigation(wizard) -> None:
+    scene = CarouselFormScene(wizard)
+
+    rows = await scene.reply_rows_for("field__nickname", None)
+
+    assert [button.text for button in rows[0]] == [
+        scene.step_previous_text,
+        scene.step_next_text,
+        scene.step_skip_text,
+    ]
+    assert [button.text for button in rows[1]] == ["Отмена"]
+
+
+@pytest.mark.asyncio
+async def test_carousel_form_scene_next_button_moves_across_answered_required_field(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__name", "name": "Alice"}
+    scene = CarouselFormScene(wizard)
+    message = FakeMessage(text=scene.step_next_text)
+
+    await scene._on_step_input(message)
+
+    assert wizard.data["_step"] == "field__nickname"
+    assert "Шаг 2/3" in message.answer_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_carousel_form_scene_next_button_blocks_empty_required_field(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__name"}
+    scene = CarouselFormScene(wizard)
+    message = FakeMessage(text=scene.step_next_text)
+
+    await scene._on_step_input(message)
+
+    assert wizard.data["_step"] == "field__name"
+    assert scene.missing_required_value_text in message.answer_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_carousel_form_scene_skip_button_skips_optional_field(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__nickname", "name": "Alice"}
+    scene = CarouselFormScene(wizard)
+    message = FakeMessage(text=scene.step_skip_text)
+
+    await scene._on_step_input(message)
+
+    assert wizard.data["nickname"] is None
+    assert wizard.data["_step"] == "field__email"
+    assert "Шаг 3/3" in message.answer_calls[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_carousel_form_scene_previous_button_returns_to_prior_question(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    wizard.data = {"_step": "field__email", "name": "Alice"}
+    scene = CarouselFormScene(wizard)
+    message = FakeMessage(text=scene.step_previous_text)
+
+    await scene._on_step_input(message)
+
+    assert wizard.data["_step"] == "field__nickname"
+    assert "Шаг 2/3" in message.answer_calls[-1]["text"]

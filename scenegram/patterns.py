@@ -162,21 +162,31 @@ class StepAction(CallbackData, prefix="step"):
 def step_nav_row(
     *,
     next_step: bool = False,
+    skip_step: bool = False,
     back: bool = True,
     exit_scene: bool = False,
+    back_text: str = "⬅️ Предыдущий шаг",
+    next_text: str = "➡️ Дальше",
+    skip_text: str = "⏭️ Пропустить",
+    exit_text: str = "✖️ Выйти",
 ) -> list[Button]:
     buttons: list[Button] = []
     if back:
-        buttons.append(Button(text="⬅️ Предыдущий шаг", callback_data=StepAction(action="back")))
+        buttons.append(Button(text=back_text, callback_data=StepAction(action="back")))
     if next_step:
-        buttons.append(Button(text="➡️ Дальше", callback_data=StepAction(action="next")))
+        buttons.append(Button(text=next_text, callback_data=StepAction(action="next")))
+    if skip_step:
+        buttons.append(Button(text=skip_text, callback_data=StepAction(action="skip")))
     if exit_scene:
-        buttons.append(Button(text="✖️ Выйти", callback_data=StepAction(action="exit")))
+        buttons.append(Button(text=exit_text, callback_data=StepAction(action="exit")))
     return buttons
 
 
 class StepScene(AppScene):
     __abstract__ = True
+    _reserved_step_method_names = frozenset(
+        {"step_storage_key", "step_reply_navigation_row", "step_navigation_action"}
+    )
 
     step_key = "_step"
     use_reply_keyboard = True
@@ -188,13 +198,17 @@ class StepScene(AppScene):
     reply_navigation_back_text = "Назад"
     reply_navigation_home_text = "Домой"
     reply_navigation_cancel_text = "Отмена"
+    step_pagination = False
+    step_previous_text = "⬅️ Предыдущий вопрос"
+    step_next_text = "➡️ Следующий вопрос"
+    step_skip_text = "⏭️ Пропустить"
 
     @classmethod
     def declared_steps(cls) -> tuple[str, ...]:
         discovered: dict[str, str] = {}
         for base in reversed(cls.mro()):
             for name, value in base.__dict__.items():
-                if name == "step_storage_key":
+                if name in cls._reserved_step_method_names:
                     continue
                 if name.startswith("step_") and callable(value):
                     discovered[name] = name
@@ -223,6 +237,9 @@ class StepScene(AppScene):
         event: Message | CallbackQuery,
     ) -> list[list[ReplyButton]]:
         rows = [list(row) for row in self.reply_rows]
+        step_navigation = await self.step_reply_navigation_row(step_name, event)
+        if step_navigation:
+            rows.append(step_navigation)
         navigation = reply_nav_row(
             back=self.reply_navigation_back,
             home=self.reply_navigation_home,
@@ -234,6 +251,23 @@ class StepScene(AppScene):
         if navigation:
             rows.append(navigation)
         return rows
+
+    async def step_reply_navigation_row(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> list[ReplyButton]:
+        if not self.step_pagination:
+            return []
+
+        buttons: list[ReplyButton] = []
+        if await self.allow_step_previous(step_name, event):
+            buttons.append(ReplyButton(text=self.step_previous_text))
+        if await self.allow_step_next(step_name, event):
+            buttons.append(ReplyButton(text=self.step_next_text))
+        if await self.allow_step_skip(step_name, event):
+            buttons.append(ReplyButton(text=self.step_skip_text))
+        return buttons
 
     async def reply_markup_for(
         self,
@@ -320,8 +354,62 @@ class StepScene(AppScene):
         await self.set_step(previous_step_name)
         return await self.render_current_step(event)
 
+    async def skip_step(self, event: Message | CallbackQuery, **data: Any) -> Any:
+        return await self.next_step(event, **data)
+
     async def on_complete(self, event: Message | CallbackQuery) -> Any:
         await self.nav.exit()
+
+    async def allow_step_previous(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> bool:
+        if not self.step_pagination:
+            return False
+        return self.declared_steps().index(step_name) > 0
+
+    async def allow_step_next(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> bool:
+        return False
+
+    async def allow_step_skip(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> bool:
+        return False
+
+    async def request_step_previous(self, event: Message | CallbackQuery) -> Any:
+        return await self.prev_step(event)
+
+    async def request_step_next(self, event: Message | CallbackQuery) -> Any:
+        return await self.next_step(event)
+
+    async def request_step_skip(self, event: Message | CallbackQuery) -> Any:
+        return await self.skip_step(event)
+
+    async def step_navigation_action(
+        self,
+        step_name: str,
+        text: str | None,
+        event: Message | CallbackQuery,
+    ) -> str | None:
+        if text is None:
+            return None
+        normalized = text.strip()
+        if not normalized:
+            return None
+        if normalized == self.step_previous_text:
+            return "back"
+        if normalized == self.step_next_text:
+            return "next"
+        if normalized == self.step_skip_text:
+            return "skip"
+        return None
 
     async def reply_navigation_action(self, text: str | None) -> str | None:
         if text is None:
@@ -345,6 +433,18 @@ class StepScene(AppScene):
             return True
         if command == "/start":
             await self._start_command(message)
+            return True
+
+        step_name = await self.current_step()
+        step_action = await self.step_navigation_action(step_name, message.text, message)
+        if step_action == "back":
+            await self.request_step_previous(message)
+            return True
+        if step_action == "next":
+            await self.request_step_next(message)
+            return True
+        if step_action == "skip":
+            await self.request_step_skip(message)
             return True
 
         action = await self.reply_navigation_action(message.text)
@@ -381,6 +481,7 @@ class StepScene(AppScene):
     @on.message(F.text)
     async def _on_step_input(self, message: Message) -> None:
         if await self.handle_reply_navigation_input(message):
+            await self.cleanup_user_message(message)
             return
 
         step_name = await self.current_step()
@@ -402,12 +503,17 @@ class StepScene(AppScene):
     @on.callback_query(StepAction.filter(F.action == "next"))
     async def _next_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.next_step(call)
+        await self.request_step_next(call)
 
     @on.callback_query(StepAction.filter(F.action == "back"))
     async def _back_action(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.prev_step(call)
+        await self.request_step_previous(call)
+
+    @on.callback_query(StepAction.filter(F.action == "skip"))
+    async def _skip_action(self, call: CallbackQuery) -> None:
+        await call.answer()
+        await self.request_step_skip(call)
 
     @on.callback_query(StepAction.filter(F.action == "exit"))
     async def _exit_action(self, call: CallbackQuery) -> None:
@@ -424,6 +530,8 @@ class FormField:
     formatter: FormHook | None = None
     storage_key: str | None = None
     summary_label: str | None = None
+    required: bool = True
+    skippable: bool | None = None
 
 
 class FormAction(CallbackData, prefix="form"):
@@ -441,6 +549,8 @@ class FormScene(StepScene):
     submit_button_text = "✅ Сохранить"
     edit_button_text = "✏️ Исправить"
     invalid_input_text = "Проверьте введённое значение и повторите ввод."
+    missing_required_value_text = "Это поле обязательное. Сначала введите значение."
+    edit_restart_from = "first"
 
     @classmethod
     def field_definitions(cls) -> tuple[FormField, ...]:
@@ -473,6 +583,17 @@ class FormScene(StepScene):
 
     def field_data_key(self, field: FormField) -> str:
         return field.storage_key or field.name
+
+    async def field_value(self, field: FormField) -> Any:
+        return await self.data.get(self.field_data_key(field))
+
+    async def field_has_value(self, field: FormField) -> bool:
+        return await self.field_value(field) is not None
+
+    def field_is_skippable(self, field: FormField) -> bool:
+        if field.skippable is not None:
+            return field.skippable
+        return field.required is not True
 
     async def render_current_step(self, event: Message | CallbackQuery) -> Any:
         step_name = await self.current_step()
@@ -622,6 +743,49 @@ class FormScene(StepScene):
     async def on_complete(self, event: Message | CallbackQuery) -> Any:
         return await self.submit_form(event)
 
+    async def allow_step_next(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> bool:
+        if not self.step_pagination or step_name == self.confirm_step_name:
+            return False
+        field = self.field_by_step(step_name)
+        return await self.field_has_value(field) or self.field_is_skippable(field)
+
+    async def allow_step_skip(
+        self,
+        step_name: str,
+        event: Message | CallbackQuery,
+    ) -> bool:
+        if not self.step_pagination or step_name == self.confirm_step_name:
+            return False
+        return self.field_is_skippable(self.field_by_step(step_name))
+
+    async def request_step_next(self, event: Message | CallbackQuery) -> Any:
+        step_name = await self.current_step()
+        if step_name == self.confirm_step_name:
+            return await super().request_step_next(event)
+
+        field = self.field_by_step(step_name)
+        if await self.field_has_value(field) or self.field_is_skippable(field):
+            return await self.next_step(event)
+        return await self.show(
+            event,
+            await self.field_error_content(field, self.missing_required_value_text),
+        )
+
+    async def request_step_skip(self, event: Message | CallbackQuery) -> Any:
+        step_name = await self.current_step()
+        field = self.field_by_step(step_name)
+        if not self.field_is_skippable(field):
+            return await self.show(
+                event,
+                await self.field_error_content(field, self.missing_required_value_text),
+            )
+        await self.data.update({self.field_data_key(field): None})
+        return await self.next_step(event)
+
     async def handle_step_input(self, message: Message, step_name: str) -> None:
         field = self.field_by_step(step_name)
 
@@ -645,7 +809,14 @@ class FormScene(StepScene):
         return hook
 
     def edit_step_name(self) -> str:
-        return self.field_step_name(self.field_definitions()[-1].name)
+        fields = self.field_definitions()
+        if self.edit_restart_from == "last":
+            return self.field_step_name(fields[-1].name)
+        if self.edit_restart_from == "first":
+            return self.field_step_name(fields[0].name)
+        raise RuntimeError(
+            f"{self.__class__.__name__}.edit_restart_from must be 'first' or 'last'"
+        )
 
     @on.callback_query(FormAction.filter(F.action == "submit"))
     async def _submit_action(self, call: CallbackQuery) -> None:

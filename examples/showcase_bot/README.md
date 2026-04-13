@@ -50,6 +50,7 @@ showcase_bot/
 
 - `FormScene` с typed result model;
 - auto reply-кнопка `Отмена` на input-шагах;
+- включённый step-carousel для возврата к предыдущим вопросам без засорения scene stack;
 - cleanup policy `delete_user_messages=True`;
 - вызов глобального сервиса через `self.services.call(...)`.
 
@@ -79,6 +80,7 @@ showcase_bot/
 - использовать `SCENEGRAM_MODULE` для самоописания модулей;
 - полагаться на `aiogram.utils.formatting`, а не на HTML-строки;
 - использовать auto reply-keyboards на `StepScene` / `FormScene` и удалять их через built-in cancel flow;
+- включать `step_pagination = True` только там, где форма должна разрешать question-level navigation;
 - задавать cleanup/chat action policies декларативно на уровне сцены.
 
 ## Запуск

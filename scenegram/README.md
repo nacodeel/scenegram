@@ -35,7 +35,7 @@
 - screen-stack navigation только по главным экранам сцен;
 - global/module/scene middlewares;
 - declarative chat actions;
-- step/forms с typed result model и auto reply-keyboards на input-экранах;
+- step/forms с typed result model, auto reply-keyboards и optional step-carousel внутри анкет;
 - portable CRUD and broadcast packs;
 - top-level public API через `scenegram.__init__`.
 
@@ -56,6 +56,7 @@
 - reply keyboard на form/step сценах остаётся opt-out и удаляется на cancel через `ReplyKeyboardRemove`, а не через неявное поведение клиента.
 - глобальный `back` идёт по собственному scene screen stack, а не по промежуточным step/page/confirm состояниям.
 - `cancel` возвращает к `home_scene` текущей сцены без потери родительского back-stack, а `home`/`/start` выполняют root reset.
+- `FormScene` по умолчанию возвращает `edit` на первый вопрос, а carousel/skip поведение включается декларативно на уровне сцены и отдельного `FormField`.
 
 ## Правила расширения
 
@@ -68,7 +69,7 @@
 
 ## Ближайшие планы
 
-- расширить declarative form layer;
+- расширить declarative form layer полями/виджетами beyond text input;
 - добавить scene packs для selection/filter/detail workflows;
 - усилить observability hooks;
 - подготовить отдельные adapters для популярных service containers.
