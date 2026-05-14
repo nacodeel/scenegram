@@ -4,6 +4,7 @@ from .base import (
     AppScene,
     SceneContextProxy,
     SceneDataProxy,
+    SceneFlowProxy,
     SceneNavigator,
     SceneServicesProxy,
 )
@@ -163,6 +164,7 @@ __all__ = [
     "SceneDataProxy",
     "SceneDeepLinksProxy",
     "SceneDescriptor",
+    "SceneFlowProxy",
     "SceneHistoryProxy",
     "SceneMiddleware",
     "SceneModule",

@@ -77,7 +77,67 @@ class ProfileScene(AppScene, state="profile.edit"):
 
 Для low-level сценариев `SceneDataProxy` теперь даёт `async with self.data.mutate(): ...`, чтобы собрать несколько изменений в один `set_data(...)` и при необходимости защитить framework keys.
 
-### 3.2. Secure scene access
+### 3.2. Scene flow context
+
+Для межсценового контекста есть отдельный high-level слой `self.flow` и helper `self.prepare(...)`.
+
+Главная идея: `Navigate.open(...)` отвечает только за переход, а данные для целевой сцены заранее кладутся в scoped context этой сцены. Поэтому callback data остаётся коротким и транспортным, а сцена получает свои аргументы автоматически.
+
+```python
+class ContactScene(PaginatedScene, state="common.contacts"):
+    __abstract__ = False
+
+    async def open_contact(self, call, contact):
+        await self.prepare("contact.notes", contact_id=contact.id)
+
+        await self.show(
+            call,
+            self.contact_content(contact),
+            reply_markup=inline_menu(
+                [[Button(text="Заметки", callback_data=Navigate.open("contact.notes"))]]
+            ),
+        )
+
+
+class ContactNotesScene(PaginatedScene, state="contact.notes"):
+    __abstract__ = False
+
+    async def render_page(self, event, *, page: int = 1, contact_id: int):
+        ...
+```
+
+Что делает framework:
+
+- `prepare("contact.notes", contact_id=...)` сохраняет context именно для `contact.notes`;
+- при входе в `ContactNotesScene` `render_page(...)` автоматически получает `contact_id`;
+- `PageNav` внутри `PaginatedScene` повторно использует тот же context при перелистывании;
+- `self.nav.to("contact.notes", contact_id=...)` по-прежнему передаёт kwargs в aiogram enter handler, но также сохраняет их в flow context целевой сцены.
+
+Доступны низкоуровневые операции:
+
+```python
+await self.flow.update("contact.notes", contact_id=123)
+await self.flow.get("contact_id", target="contact.notes")
+await self.flow.require("contact_id")
+await self.flow.clear("contact.notes")
+```
+
+Для программного перехода с подготовкой context можно использовать:
+
+```python
+await self.open("contact.notes", contact_id=123)
+```
+
+Для кнопок, где удобнее получить готовый callback после подготовки context:
+
+```python
+Button(
+    text="Заметки",
+    callback_data=await self.nav.callback("contact.notes", contact_id=123),
+)
+```
+
+### 3.3. Secure scene access
 
 Role-фильтры теперь применяются не только на entrypoints, но и на внутренних переходах сцен.
 
@@ -87,7 +147,7 @@ Role-фильтры теперь применяются не только на e
 - `self.nav.to(...)`, `self.nav.replace(...)`, `wizard.goto(...)` и `ScenesManager.enter(...)` проходят через guard;
 - при запрете перехода пользователь получает короткий notice, а framework не кладёт forbidden scene в stack.
 
-### 3.3. Deep links как часть scene-layer
+### 3.4. Deep links как часть scene-layer
 
 Scenegram теперь работает с deep links не как с ручным `/start ...`, а как с частью scene framework.
 
@@ -751,6 +811,7 @@ class AdminBroadcastScene(BroadcastScene, state="admin.broadcast"):
 
 - `AppScene`
 - `SceneDataProxy`
+- `SceneFlowProxy`
 - `SceneServicesProxy`
 - `SceneHistoryProxy`
 - `SceneNavigator`

@@ -96,12 +96,16 @@ class MenuScene(AppScene):
         )
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, **context: Any) -> None:
+        if context:
+            await self.prepare(**context)
         await self.render_menu(message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         await self.render_menu(call)
 
 
@@ -152,7 +156,10 @@ class DeepLinkScene(_DeepLinkEntrySupport, AppScene):
         self,
         message: Message,
         command: CommandObject | None = None,
+        **context: Any,
     ) -> None:
+        if context:
+            await self.prepare(**context)
         await self.handle_start_entry(message, command)
 
 
@@ -172,7 +179,10 @@ class DeepLinkMenuScene(_DeepLinkEntrySupport, MenuScene):
         self,
         message: Message,
         command: CommandObject | None = None,
+        **context: Any,
     ) -> None:
+        if context:
+            await self.prepare(**context)
         await self.handle_start_entry(message, command)
 
 
@@ -213,12 +223,16 @@ class ConfirmScene(AppScene):
         await self.nav.back()
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, **context: Any) -> None:
+        if context:
+            await self.prepare(**context)
         await self.render_confirm(message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         await self.render_confirm(call)
 
     @on.callback_query(ConfirmAction.filter(F.action == "confirm"))
@@ -623,13 +637,17 @@ class StepScene(AppScene):
         await self.next_step(message)
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, **context: Any) -> None:
+        if context:
+            await self.prepare(**context)
         await self.set_step(await self.current_step())
         await self.run_operation("render_current_step", message, self.render_current_step, message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         await self.set_step(await self.current_step())
         await self.run_operation("render_current_step", call, self.render_current_step, call)
 

@@ -4,7 +4,7 @@
 
 ## Содержимое пакета
 
-- `base.py` — `AppScene`, data/services/history/navigation proxies, render pipeline, cleanup, chat actions.
+- `base.py` — `AppScene`, data/services/flow/history/navigation proxies, render pipeline, cleanup, chat actions.
 - `bootstrap.py` — discovery, descriptors, role-aware router assembly, scene registry bootstrap.
 - `cli.py` — CLI для `check` и генерации шаблонов сцен/модулей.
 - `contracts.py` — typed contracts для scene modules, middleware bindings, menu contributions, cleanup, CRUD и broadcast adapters.
@@ -36,6 +36,7 @@
 - auto-discovery и auto-registration сцен;
 - role-aware routing и home scenes;
 - service container + module-local services;
+- scoped scene flow context для подготовки дочерних сцен без payload в callback data;
 - typed state descriptors и mutation contexts поверх raw scene data;
 - deep-link entry scenes, scene-attached routes и stored/signed deep-link execution;
 - cleanup policies и breadcrumbs/history;
@@ -61,6 +62,7 @@
 - formatting не оборачивается в новый публичный DSL; поддерживается нативный aiogram `Text`.
 - runtime остаётся process-local и лёгким; тяжёлые очереди пользователь подключает через свои adapters.
 - scene packs не зависят от ORM/БД; всё доменное поведение идёт через adapters/services.
+- `Navigate` остаётся transport-only навигацией; данные для целевых сцен передаются через `self.prepare(...)` / `self.flow`, а не через callback payload.
 - module manifests завязаны на package prefix, чтобы сцены автоматически связывались со своим модулем.
 - middleware применяются через wrapper-router на сцену, чтобы entrypoints и scene handlers шли через единый pipeline.
 - внутренние переходы дополнительно проверяются на роли через secure manager proxy, а не только через router filters.
@@ -78,6 +80,7 @@
 - новые packs должны быть самодостаточными и переносимыми;
 - scene-level middlewares должны объявляться через typed bindings, а не через ручную регистрацию снаружи;
 - middleware/update context должен быть доступен и в aiogram handlers, и во framework-level scene hooks через именованные параметры или `self.context`;
+- межсценовый бизнес-контекст должен идти через `self.prepare(...)` / `self.flow`, а не через произвольные framework keys в raw `self.data`;
 - любой новый runtime hook обязан иметь тесты;
 - при значимых изменениях обновлять этот README и корневой README.
 

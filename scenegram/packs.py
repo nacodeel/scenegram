@@ -120,12 +120,16 @@ class CrudListScene(AppScene):
         )
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, **context: Any) -> None:
+        if context:
+            await self.prepare(**context)
         await self.render_page(message, page=await self.current_page())
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         await self.render_page(call, page=await self.current_page())
 
     @on.callback_query(CrudAction.filter(F.action == "open"))
@@ -246,7 +250,14 @@ class CrudDetailScene(AppScene):
         )
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
+    async def _on_message_enter(
+        self,
+        message: Message,
+        item_id: str | None = None,
+        **context: Any,
+    ) -> None:
+        if context:
+            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await self.render_detail(message)
@@ -254,8 +265,15 @@ class CrudDetailScene(AppScene):
             await self.handle_missing_item(message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
+    async def _on_callback_enter(
+        self,
+        call: CallbackQuery,
+        item_id: str | None = None,
+        **context: Any,
+    ) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await self.render_detail(call)
@@ -370,7 +388,14 @@ class CrudDeleteScene(ConfirmScene):
         return None
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message, item_id: str | None = None) -> None:
+    async def _on_message_enter(
+        self,
+        message: Message,
+        item_id: str | None = None,
+        **context: Any,
+    ) -> None:
+        if context:
+            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await super()._on_message_enter(message)
@@ -378,7 +403,14 @@ class CrudDeleteScene(ConfirmScene):
             await self.handle_missing_item(message)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery, item_id: str | None = None) -> None:
+    async def _on_callback_enter(
+        self,
+        call: CallbackQuery,
+        item_id: str | None = None,
+        **context: Any,
+    ) -> None:
+        if context:
+            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await super()._on_callback_enter(call)

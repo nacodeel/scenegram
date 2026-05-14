@@ -33,21 +33,31 @@ class PaginatedScene(AppScene):
     initial_page = 1
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message) -> None:
+    async def _on_message_enter(self, message: Message, **context: Any) -> None:
+        if context:
+            await self.prepare(**context)
         page = await self.current_page(default=self.initial_page)
-        await self.render_page(message, page=page)
+        await self.run_operation("render_page", message, self.render_page, message, page=page)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
+        if context:
+            await self.prepare(**context)
         page = await self.current_page(default=self.initial_page)
-        await self.render_page(call, page=page)
+        await self.run_operation("render_page", call, self.render_page, call, page=page)
 
     @on.callback_query(PageNav.filter())
     async def _switch_page(self, call: CallbackQuery, callback_data: PageNav) -> None:
         await call.answer()
         await self.remember_page(callback_data.page)
-        await self.render_page(call, page=callback_data.page)
+        await self.run_operation(
+            "render_page",
+            call,
+            self.render_page,
+            call,
+            page=callback_data.page,
+        )
 
     async def render_page(self, event: Message | CallbackQuery, *, page: int = 1) -> Any:
         raise NotImplementedError

@@ -72,7 +72,12 @@ class DemoConfirmScene(ConfirmScene, state="tests.confirm"):
 class DemoPaginatedScene(PaginatedScene, state="tests.page"):
     __abstract__ = False
 
-    async def render_page(self, event, *, page: int = 1):
+    def __init__(self, wizard):
+        super().__init__(wizard)
+        self.render_calls: list[dict[str, object]] = []
+
+    async def render_page(self, event, *, page: int = 1, contact_id: int | None = None):
+        self.render_calls.append({"page": page, "contact_id": contact_id})
         return page
 
 
@@ -499,6 +504,64 @@ async def test_paginated_scene_defaults_to_first_page_for_invalid_state(wizard) 
 
 
 @pytest.mark.asyncio
+async def test_prepare_stores_scoped_context_for_target_scene(wizard) -> None:
+    scene = DemoScene(wizard)
+
+    payload = await scene.prepare("tests.page", contact_id=123)
+
+    assert payload == {"contact_id": 123}
+    assert wizard.data["_scenegram_context"] == {"tests.page": {"contact_id": 123}}
+    assert await scene.flow.get("contact_id", target="tests.page") == 123
+
+
+@pytest.mark.asyncio
+async def test_paginated_scene_injects_prepared_context_into_render_page(
+    wizard,
+    monkeypatch,
+) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    source = DemoScene(wizard)
+    await source.prepare("tests.page", contact_id=123)
+    scene = DemoPaginatedScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._on_callback_enter(call)
+
+    assert scene.render_calls[-1] == {"page": 1, "contact_id": 123}
+
+
+@pytest.mark.asyncio
+async def test_paginated_scene_persists_enter_kwargs_as_context(wizard, monkeypatch) -> None:
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    scene = DemoPaginatedScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._on_callback_enter(call, contact_id=456)
+
+    assert scene.render_calls[-1] == {"page": 1, "contact_id": 456}
+    assert wizard.data["_scenegram_context"]["tests.page"] == {"contact_id": 456}
+
+
+@pytest.mark.asyncio
+async def test_paginated_scene_reuses_context_when_switching_pages(wizard, monkeypatch) -> None:
+    from scenegram import PageNav
+    from tests.conftest import FakeCallbackQuery
+
+    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
+    wizard.data = {"_scenegram_context": {"tests.page": {"contact_id": 789}}}
+    scene = DemoPaginatedScene(wizard)
+    call = FakeCallbackQuery()
+
+    await scene._switch_page(call, PageNav(page=3))
+
+    assert scene.render_calls[-1] == {"page": 3, "contact_id": 789}
+
+
+@pytest.mark.asyncio
 async def test_navigator_home_uses_runtime_default_home(wizard) -> None:
     scene = DemoScene(wizard)
     RUNTIME.default_home = "tests.demo"
@@ -572,6 +635,27 @@ async def test_navigator_replace_enters_target_without_snapshotting_current_scen
     assert wizard.leave_calls == [(False, {"page": 2})]
     assert wizard.manager.enter_calls == [("tests.confirm", False, {"page": 2})]
     assert wizard.data["_scene_stack"] == ["tests.confirm"]
+    assert wizard.data["_scenegram_context"] == {"tests.confirm": {"page": 2}}
+
+
+@pytest.mark.asyncio
+async def test_navigator_to_stores_kwargs_as_target_context(wizard) -> None:
+    scene = DemoScene(wizard)
+
+    await scene.nav.to("tests.page", contact_id=123)
+
+    assert wizard.goto_calls == [("tests.page", {"contact_id": 123})]
+    assert wizard.data["_scenegram_context"] == {"tests.page": {"contact_id": 123}}
+
+
+@pytest.mark.asyncio
+async def test_navigator_callback_prepares_context_and_returns_plain_navigation(wizard) -> None:
+    scene = DemoScene(wizard)
+
+    callback_data = await scene.nav.callback("tests.page", contact_id=123)
+
+    assert callback_data == Navigate.open("tests.page")
+    assert wizard.data["_scenegram_context"] == {"tests.page": {"contact_id": 123}}
 
 
 @pytest.mark.asyncio

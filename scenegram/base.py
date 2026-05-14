@@ -44,6 +44,7 @@ FRAMEWORK_DATA_KEYS = frozenset(
     {
         "_back_target",
         "_history",
+        "_scenegram_context",
         "_scene_stack",
         "_screen_message_id",
     }
@@ -214,6 +215,121 @@ class SceneContextProxy:
         return value
 
 
+class SceneFlowProxy:
+    def __init__(self, scene: AppScene, *, key: str = "_scenegram_context") -> None:
+        self.scene = scene
+        self._key = key
+
+    def _target_state(self, target: type[Scene] | str | None = None) -> str:
+        if target is None:
+            return self.scene.state_id
+        resolved = resolve_target_state(target)
+        if resolved is None:
+            raise ValueError(f"Cannot resolve scene state for {target!r}")
+        return resolved
+
+    async def _store(self) -> dict[str, dict[str, Any]]:
+        raw = await self.scene.data.get(self._key, {})
+        if not isinstance(raw, Mapping):
+            return {}
+        store: dict[str, dict[str, Any]] = {}
+        for state, payload in raw.items():
+            if isinstance(state, str) and isinstance(payload, Mapping):
+                store[state] = dict(payload)
+        return store
+
+    async def all(self, target: type[Scene] | str | None = None) -> dict[str, Any]:
+        store = await self._store()
+        return dict(store.get(self._target_state(target), {}))
+
+    async def get(
+        self,
+        key: str,
+        default: Any | None = None,
+        *,
+        target: type[Scene] | str | None = None,
+    ) -> Any:
+        payload = await self.all(target)
+        return payload.get(key, default)
+
+    async def require(
+        self,
+        key: str,
+        *,
+        target: type[Scene] | str | None = None,
+    ) -> Any:
+        value = await self.get(key, target=target)
+        if value is None:
+            state = self._target_state(target)
+            raise KeyError(f"Missing scene context key for {state}: {key}")
+        return value
+
+    async def update(
+        self,
+        target: type[Scene] | str | None = None,
+        data: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        state = self._target_state(target)
+        store = await self._store()
+        payload = dict(store.get(state, {}))
+        payload.update(dict(data or {}))
+        payload.update(kwargs)
+        store[state] = payload
+        await self.scene.data.update({self._key: store})
+        return dict(payload)
+
+    async def set(
+        self,
+        target: type[Scene] | str | None = None,
+        data: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        state = self._target_state(target)
+        payload = dict(data or {})
+        payload.update(kwargs)
+        store = await self._store()
+        store[state] = payload
+        await self.scene.data.update({self._key: store})
+        return dict(payload)
+
+    async def clear(self, target: type[Scene] | str | None = None) -> None:
+        state = self._target_state(target)
+        store = await self._store()
+        store.pop(state, None)
+        await self.scene.data.update({self._key: store})
+
+    async def discard(
+        self,
+        *keys: str,
+        target: type[Scene] | str | None = None,
+    ) -> dict[str, Any]:
+        state = self._target_state(target)
+        store = await self._store()
+        payload = dict(store.get(state, {}))
+        for key in keys:
+            payload.pop(key, None)
+        store[state] = payload
+        await self.scene.data.update({self._key: store})
+        return dict(payload)
+
+    async def model(
+        self,
+        model_cls: type[ModelT],
+        target: type[Scene] | str | None = None,
+    ) -> ModelT:
+        payload = await self.all(target)
+        validator = getattr(model_cls, "model_validate", None)
+        if callable(validator):
+            return cast(ModelT, validator(payload))
+
+        if is_dataclass(model_cls):
+            allowed = {field.name for field in fields(model_cls)}
+            return model_cls(**{key: value for key, value in payload.items() if key in allowed})
+
+        return model_cls(**payload)
+
+
 class SceneNavigator:
     def __init__(self, scene: AppScene) -> None:
         self.scene = scene
@@ -225,6 +341,8 @@ class SceneNavigator:
         target_state = self._target_state(target)
         if not await self.scene.ensure_scene_access(target_state):
             return
+        if target_state is not None and kwargs:
+            await self.scene.prepare(target_state, **kwargs)
         if target_state is not None:
             await self.scene.stack.push(target_state)
         await self.scene.runtime.emit(
@@ -240,6 +358,8 @@ class SceneNavigator:
         target_state = self._target_state(target)
         if target_state is not None and not await self.scene.ensure_scene_access(target_state):
             return
+        if target_state is not None and kwargs:
+            await self.scene.prepare(target_state, **kwargs)
         if target_state is None:
             await self.replace(target, sync_stack=False, **kwargs)
             return
@@ -281,6 +401,8 @@ class SceneNavigator:
         target_state = self._target_state(target)
         if target_state is not None and not await self.scene.ensure_scene_access(target_state):
             return
+        if target_state is not None and kwargs:
+            await self.scene.prepare(target_state, **kwargs)
 
         if history is not None and reset_history and hasattr(history, "clear"):
             await history.clear()
@@ -377,6 +499,14 @@ class SceneNavigator:
             return
         await self.exit(**kwargs)
 
+    async def callback(self, target: type[Scene] | str, **context: Any) -> Navigate:
+        if context:
+            await self.scene.prepare(target, **context)
+        target_state = self._target_state(target)
+        if target_state is None:
+            raise ValueError(f"Cannot resolve scene state for {target!r}")
+        return Navigate.open(target_state)
+
     async def stack_states(self) -> list[str]:
         states = await self.scene.stack.states()
         if states:
@@ -439,6 +569,7 @@ class AppScene(Scene, reset_history_on_enter=False):
                 wizard.manager = SecureScenesManagerProxy(manager, scene=self)
         self.data = SceneDataProxy(wizard)
         self.context = SceneContextProxy(self)
+        self.flow = SceneFlowProxy(self)
         self.services = SceneServicesProxy(self)
         self.history = SceneHistoryProxy(self.data)
         self.stack = SceneStackProxy(self.data)
@@ -474,6 +605,36 @@ class AppScene(Scene, reset_history_on_enter=False):
         if isinstance(wizard_data, Mapping):
             payload.update(wizard_data)
         return payload
+
+    async def operation_data(self, **kwargs: Any) -> dict[str, Any]:
+        payload = self.context_data()
+        payload.update(await self.flow.all())
+        payload.update(kwargs)
+        return payload
+
+    async def prepare(
+        self,
+        target: type[Scene] | str | None = None,
+        data: Mapping[str, Any] | None = None,
+        **context: Any,
+    ) -> dict[str, Any]:
+        return await self.flow.update(target, data, **context)
+
+    async def open(self, target: type[Scene] | str, **context: Any) -> None:
+        if context:
+            await self.prepare(target, **context)
+        await self.nav.to(target)
+
+    async def replace_with(
+        self,
+        target: type[Scene] | str,
+        *,
+        reset_history: bool = False,
+        **context: Any,
+    ) -> None:
+        if context:
+            await self.prepare(target, **context)
+        await self.nav.replace(target, reset_history=reset_history)
 
     async def current_roles(self, event: Any | None = None) -> set[str]:
         return await resolve_event_roles(event or self.current_event())
@@ -562,6 +723,7 @@ class AppScene(Scene, reset_history_on_enter=False):
         callback: Any,
         *args: Any,
         action: str | SceneActionConfig | None = None,
+        **kwargs: Any,
     ) -> Any:
         config = self.action_config_for(operation=operation, override=action)
         await self.runtime.emit(
@@ -575,7 +737,7 @@ class AppScene(Scene, reset_history_on_enter=False):
                 result = await call_with_optional_args(
                     callback,
                     *args,
-                    **self.context_data(),
+                    **await self.operation_data(**kwargs),
                 )
         except Exception as exc:
             await self.runtime.emit(
