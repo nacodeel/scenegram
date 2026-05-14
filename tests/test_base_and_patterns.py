@@ -540,10 +540,24 @@ async def test_paginated_scene_persists_enter_kwargs_as_context(wizard, monkeypa
     scene = DemoPaginatedScene(wizard)
     call = FakeCallbackQuery()
 
-    await scene._on_callback_enter(call, contact_id=456)
+    dispatcher = object()
+
+    await scene._on_callback_enter(call, contact_id=456, dispatcher=dispatcher)
 
     assert scene.render_calls[-1] == {"page": 1, "contact_id": 456}
     assert wizard.data["_scenegram_context"]["tests.page"] == {"contact_id": 456}
+
+
+@pytest.mark.asyncio
+async def test_menu_scene_does_not_persist_middleware_context(wizard) -> None:
+    from tests.conftest import FakeMessage
+
+    scene = DemoMenuScene(wizard)
+    message = FakeMessage()
+
+    await scene._on_message_enter(message, dispatcher=object())
+
+    assert "_scenegram_context" not in wizard.data
 
 
 @pytest.mark.asyncio

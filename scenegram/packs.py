@@ -121,15 +121,11 @@ class CrudListScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, **context: Any) -> None:
-        if context:
-            await self.prepare(**context)
         await self.render_page(message, page=await self.current_page())
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
         await self.render_page(call, page=await self.current_page())
 
     @on.callback_query(CrudAction.filter(F.action == "open"))
@@ -256,8 +252,6 @@ class CrudDetailScene(AppScene):
         item_id: str | None = None,
         **context: Any,
     ) -> None:
-        if context:
-            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await self.render_detail(message)
@@ -272,8 +266,6 @@ class CrudDetailScene(AppScene):
         **context: Any,
     ) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await self.render_detail(call)
@@ -394,8 +386,6 @@ class CrudDeleteScene(ConfirmScene):
         item_id: str | None = None,
         **context: Any,
     ) -> None:
-        if context:
-            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await super()._on_message_enter(message)
@@ -409,8 +399,6 @@ class CrudDeleteScene(ConfirmScene):
         item_id: str | None = None,
         **context: Any,
     ) -> None:
-        if context:
-            await self.prepare(**context)
         try:
             await self.remember_item_id(item_id)
             await super()._on_callback_enter(call)

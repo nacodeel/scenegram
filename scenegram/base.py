@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Iterable, Mapping
 from contextlib import asynccontextmanager
@@ -611,6 +612,36 @@ class AppScene(Scene, reset_history_on_enter=False):
         payload.update(await self.flow.all())
         payload.update(kwargs)
         return payload
+
+    def accepted_context_for(
+        self,
+        callback: Any,
+        context: Mapping[str, Any],
+        *,
+        exclude: Iterable[str] = (),
+    ) -> dict[str, Any]:
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return {}
+
+        excluded = set(exclude)
+        accepted: set[str] = set()
+        for parameter in signature.parameters.values():
+            if parameter.kind not in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ):
+                continue
+            if parameter.name in excluded:
+                continue
+            accepted.add(parameter.name)
+
+        return {
+            key: value
+            for key, value in context.items()
+            if key in accepted
+        }
 
     async def prepare(
         self,

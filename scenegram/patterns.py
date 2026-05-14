@@ -97,15 +97,11 @@ class MenuScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, **context: Any) -> None:
-        if context:
-            await self.prepare(**context)
         await self.render_menu(message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
         await self.render_menu(call)
 
 
@@ -158,8 +154,6 @@ class DeepLinkScene(_DeepLinkEntrySupport, AppScene):
         command: CommandObject | None = None,
         **context: Any,
     ) -> None:
-        if context:
-            await self.prepare(**context)
         await self.handle_start_entry(message, command)
 
 
@@ -181,8 +175,6 @@ class DeepLinkMenuScene(_DeepLinkEntrySupport, MenuScene):
         command: CommandObject | None = None,
         **context: Any,
     ) -> None:
-        if context:
-            await self.prepare(**context)
         await self.handle_start_entry(message, command)
 
 
@@ -224,15 +216,11 @@ class ConfirmScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, **context: Any) -> None:
-        if context:
-            await self.prepare(**context)
         await self.render_confirm(message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
         await self.render_confirm(call)
 
     @on.callback_query(ConfirmAction.filter(F.action == "confirm"))
@@ -638,16 +626,12 @@ class StepScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, **context: Any) -> None:
-        if context:
-            await self.prepare(**context)
         await self.set_step(await self.current_step())
         await self.run_operation("render_current_step", message, self.render_current_step, message)
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
         await self.set_step(await self.current_step())
         await self.run_operation("render_current_step", call, self.render_current_step, call)
 

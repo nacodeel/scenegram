@@ -34,18 +34,42 @@ class PaginatedScene(AppScene):
 
     @on.message.enter()
     async def _on_message_enter(self, message: Message, **context: Any) -> None:
-        if context:
-            await self.prepare(**context)
+        accepted_context = self.accepted_context_for(
+            self.render_page,
+            context,
+            exclude={"event", "page"},
+        )
+        if accepted_context:
+            await self.prepare(**accepted_context)
         page = await self.current_page(default=self.initial_page)
-        await self.run_operation("render_page", message, self.render_page, message, page=page)
+        await self.run_operation(
+            "render_page",
+            message,
+            self.render_page,
+            message,
+            page=page,
+            **accepted_context,
+        )
 
     @on.callback_query.enter()
     async def _on_callback_enter(self, call: CallbackQuery, **context: Any) -> None:
         await call.answer()
-        if context:
-            await self.prepare(**context)
+        accepted_context = self.accepted_context_for(
+            self.render_page,
+            context,
+            exclude={"event", "page"},
+        )
+        if accepted_context:
+            await self.prepare(**accepted_context)
         page = await self.current_page(default=self.initial_page)
-        await self.run_operation("render_page", call, self.render_page, call, page=page)
+        await self.run_operation(
+            "render_page",
+            call,
+            self.render_page,
+            call,
+            page=page,
+            **accepted_context,
+        )
 
     @on.callback_query(PageNav.filter())
     async def _switch_page(self, call: CallbackQuery, callback_data: PageNav) -> None:
