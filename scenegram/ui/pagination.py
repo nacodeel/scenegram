@@ -30,39 +30,27 @@ class PaginatedScene(AppScene):
     __abstract__ = True
     page_size = 8
     page_state_key = "_page"
-    nav_params_state_key = "_nav_params"
     initial_page = 1
 
     @on.message.enter()
-    async def _on_message_enter(self, message: Message, **params: Any) -> None:
-        await self.remember_nav_params(params)
+    async def _on_message_enter(self, message: Message) -> None:
         page = await self.current_page(default=self.initial_page)
-        await self.render_page(message, page=page, **await self.navigation_params())
+        await self.render_page(message, page=page)
 
     @on.callback_query.enter()
-    async def _on_callback_enter(self, call: CallbackQuery, **params: Any) -> None:
+    async def _on_callback_enter(self, call: CallbackQuery) -> None:
         await call.answer()
-        await self.remember_nav_params(params)
         page = await self.current_page(default=self.initial_page)
-        await self.render_page(call, page=page, **await self.navigation_params())
+        await self.render_page(call, page=page)
 
     @on.callback_query(PageNav.filter())
     async def _switch_page(self, call: CallbackQuery, callback_data: PageNav) -> None:
         await call.answer()
         await self.remember_page(callback_data.page)
-        await self.render_page(call, page=callback_data.page, **await self.navigation_params())
+        await self.render_page(call, page=callback_data.page)
 
     async def render_page(self, event: Message | CallbackQuery, *, page: int = 1) -> Any:
         raise NotImplementedError
-
-    async def remember_nav_params(self, params: dict[str, Any]) -> None:
-        await self.data.update({self.nav_params_state_key: dict(params)})
-
-    async def navigation_params(self) -> dict[str, Any]:
-        stored = await self.data.get(self.nav_params_state_key, {})
-        if not isinstance(stored, dict):
-            return {}
-        return dict(stored)
 
     async def current_page(self, default: int = 1) -> int:
         page = await self.data.get(self.page_state_key, default)

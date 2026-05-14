@@ -44,7 +44,6 @@ FRAMEWORK_DATA_KEYS = frozenset(
     {
         "_back_target",
         "_history",
-        "_nav_params",
         "_scene_stack",
         "_screen_message_id",
     }
@@ -755,43 +754,34 @@ class AppScene(Scene, reset_history_on_enter=False):
     @on.callback_query(Navigate.filter(F.action == "open"))
     async def _navigate_open(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
-        params = callback_data.params_payload
         if callback_data.target == self.state_id:
-            await self.nav.replace(callback_data.target, **params)
+            await self.nav.replace(callback_data.target)
             return
-        await self.nav.to(callback_data.target, **params)
-
-    @on.callback_query(Navigate.filter(F.action == "replace"))
-    async def _navigate_replace(self, call: CallbackQuery, callback_data: Navigate) -> None:
-        await call.answer()
-        await self.nav.replace(callback_data.target, **callback_data.params_payload)
+        await self.nav.to(callback_data.target)
 
     @on.callback_query(Navigate.filter(F.action == "back"))
     async def _navigate_back(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
-        params = callback_data.params_payload
         if callback_data.target:
-            await self.nav.back_to(callback_data.target, **params)
+            await self.nav.back_to(callback_data.target)
             return
-        await self.nav.back(**params)
+        await self.nav.back()
 
     @on.callback_query(Navigate.filter(F.action == "home"))
     async def _navigate_home(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer()
-        params = callback_data.params_payload
         if callback_data.target:
-            await self.nav.replace(callback_data.target, reset_history=True, **params)
+            await self.nav.replace(callback_data.target, reset_history=True)
             return
-        await self.nav.home(**params)
+        await self.nav.home()
 
     @on.callback_query(Navigate.filter(F.action == "cancel"))
     async def _navigate_cancel(self, call: CallbackQuery, callback_data: Navigate) -> None:
         await call.answer("Отменено")
-        params = callback_data.params_payload
         if callback_data.target:
-            await self.nav.back_to(callback_data.target, **params)
+            await self.nav.back_to(callback_data.target)
             return
-        await self.nav.cancel(**params)
+        await self.nav.cancel()
 
     @on.callback_query(F.data == "noop")
     async def _noop(self, call: CallbackQuery) -> None:

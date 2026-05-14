@@ -23,32 +23,6 @@ def test_inline_menu_packs_callback_data() -> None:
     assert markup.inline_keyboard[0][0].callback_data == Navigate.open("common.catalog").pack()
 
 
-def test_navigate_pack_without_params_keeps_legacy_format() -> None:
-    assert Navigate.open("common.catalog").pack() == "nav:open:common.catalog"
-
-
-def test_navigate_pack_with_params_serializes_payload() -> None:
-    packed = Navigate.open("crm.deals", contact_id=123, page=2, tab=None).pack()
-    unpacked = Navigate.unpack(packed)
-
-    assert unpacked.action == "open"
-    assert unpacked.target == "crm.deals"
-    assert unpacked.params_payload == {"contact_id": 123, "page": 2, "tab": None}
-
-
-def test_navigate_unpack_supports_legacy_callbacks() -> None:
-    unpacked = Navigate.unpack("nav:home:common.start")
-
-    assert unpacked.action == "home"
-    assert unpacked.target == "common.start"
-    assert unpacked.params_payload == {}
-
-
-def test_navigate_decode_nav_params_rejects_unsupported_values() -> None:
-    with pytest.raises(TypeError):
-        Navigate.open("common.catalog", when=object())
-
-
 def test_inline_menu_forwards_api_kwargs() -> None:
     markup = inline_menu(
         [[Button(text="Search", api_kwargs={"switch_inline_query_current_chat": "catalog"})]]

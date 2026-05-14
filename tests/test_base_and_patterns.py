@@ -17,7 +17,6 @@ from scenegram import (
     MenuContribution,
     MenuScene,
     Navigate,
-    PageNav,
     PaginatedScene,
     ReplyButton,
     SceneModule,
@@ -73,12 +72,7 @@ class DemoConfirmScene(ConfirmScene, state="tests.confirm"):
 class DemoPaginatedScene(PaginatedScene, state="tests.page"):
     __abstract__ = False
 
-    def __init__(self, wizard):
-        super().__init__(wizard)
-        self.render_calls: list[dict[str, object]] = []
-
-    async def render_page(self, event, *, page: int = 1, contact_id: int | None = None):
-        self.render_calls.append({"page": page, "contact_id": contact_id})
+    async def render_page(self, event, *, page: int = 1):
         return page
 
 
@@ -505,33 +499,6 @@ async def test_paginated_scene_defaults_to_first_page_for_invalid_state(wizard) 
 
 
 @pytest.mark.asyncio
-async def test_paginated_scene_enter_remembers_navigation_params(wizard) -> None:
-    from tests.conftest import FakeCallbackQuery
-
-    scene = DemoPaginatedScene(wizard)
-    call = FakeCallbackQuery()
-
-    await scene._on_callback_enter(call, contact_id=123)
-
-    assert scene.render_calls[-1] == {"page": 1, "contact_id": 123}
-    assert wizard.data["_nav_params"] == {"contact_id": 123}
-
-
-@pytest.mark.asyncio
-async def test_paginated_scene_switch_page_reuses_navigation_params(wizard) -> None:
-    from tests.conftest import FakeCallbackQuery
-
-    scene = DemoPaginatedScene(wizard)
-    wizard.data = {"_nav_params": {"contact_id": 123}}
-    call = FakeCallbackQuery()
-
-    await scene._switch_page(call, PageNav(page=2))
-
-    assert scene.render_calls[-1] == {"page": 2, "contact_id": 123}
-    assert wizard.data["_page"] == 2
-
-
-@pytest.mark.asyncio
 async def test_navigator_home_uses_runtime_default_home(wizard) -> None:
     scene = DemoScene(wizard)
     RUNTIME.default_home = "tests.demo"
@@ -624,34 +591,6 @@ async def test_navigate_open_replaces_current_scene_without_duplicating_history(
     assert wizard.leave_calls == [(False, {})]
     assert wizard.manager.enter_calls == [("tests.demo", False, {})]
     assert wizard.data["_scene_stack"] == ["tests.demo"]
-
-
-@pytest.mark.asyncio
-async def test_navigate_open_forwards_params_to_target_scene(wizard, monkeypatch) -> None:
-    from tests.conftest import FakeCallbackQuery
-
-    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
-    scene = DemoScene(wizard)
-    call = FakeCallbackQuery()
-
-    await scene._navigate_open(call, Navigate.open("tests.confirm", contact_id=123, page=2))
-
-    assert wizard.goto_calls == [("tests.confirm", {"contact_id": 123, "page": 2})]
-
-
-@pytest.mark.asyncio
-async def test_navigate_home_forwards_params_to_target_scene(wizard, monkeypatch) -> None:
-    from tests.conftest import FakeCallbackQuery
-
-    monkeypatch.setattr(base_module, "CallbackQuery", FakeCallbackQuery)
-    scene = DemoScene(wizard)
-    call = FakeCallbackQuery()
-
-    await scene._navigate_home(call, Navigate.home("tests.confirm", tab="stats"))
-
-    assert wizard.goto_calls == []
-    assert wizard.leave_calls == [(False, {"tab": "stats"})]
-    assert wizard.manager.enter_calls == [("tests.confirm", False, {"tab": "stats"})]
 
 
 @pytest.mark.asyncio
